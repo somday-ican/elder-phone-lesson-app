@@ -178,8 +178,8 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
       touchTarget: RelativeTarget(
         x: relativePosition.dx,
         y: relativePosition.dy,
-        width: 0.16,
-        height: 0.10,
+        width: 0.24,
+        height: 0.16,
         label: '第 ${imageIndex + 1} 步操作位置',
       ),
     );
@@ -896,7 +896,7 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
                 aspectRatio: 9 / 16,
                 target: target,
                 interactive: true,
-                hitRadius: 0.14,
+                hitRadius: 0.20,
                 onPracticeResult: (correct) {
                   _handlePracticeTap(frame.index, correct);
                 },
