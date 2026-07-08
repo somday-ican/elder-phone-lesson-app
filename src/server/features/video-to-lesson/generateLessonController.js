@@ -20,7 +20,16 @@ export async function generateLessonController(req, res, config) {
   const generator = createGenerator(config);
   const validator = new LessonValidator();
 
-  const lesson = await generator.generate({ ...request.value, prompt });
+  let lesson;
+  try {
+    lesson = await generator.generate({ ...request.value, prompt });
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Lesson model request failed.",
+      details: error.message
+    });
+    return;
+  }
   const validation = validator.validate(lesson);
 
   if (!validation.ok) {

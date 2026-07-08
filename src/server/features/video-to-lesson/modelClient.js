@@ -59,8 +59,8 @@ function buildSystemPrompt() {
 
 function buildUserContent({ frames, sourceVideo, videoMeta, audience, goal, prompt }) {
   const text = [
-    "Analyze this smartphone operation recording and generate an elderly-friendly tutorial.",
-    "Prefer the original video when it is provided. Use image frames as fallback context and for frameIndex references.",
+    "Analyze this smartphone operation recording from the sampled frame sequence and generate an elderly-friendly tutorial.",
+    "Use the image frames as the source of truth. Treat them as chronological samples from one screen recording.",
     "If touchCandidate exists, use it only as a hint, not as the only source of truth.",
     "Return JSON with exactly this top-level shape: { \"lesson\": { ... } }.",
     "Action type must be one of: tap, long_press, swipe, type, wait, observe.",
@@ -75,16 +75,6 @@ function buildUserContent({ frames, sourceVideo, videoMeta, audience, goal, prom
 
   return [
     { type: "text", text },
-    ...(sourceVideo
-      ? [
-          {
-            type: "video_url",
-            video_url: {
-              url: sourceVideo.data
-            }
-          }
-        ]
-      : []),
     ...frames.map((frame) => ({
       type: "image_url",
       image_url: {

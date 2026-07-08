@@ -10,10 +10,12 @@ class RemoteMultimodalModelClient implements ModelClient {
   const RemoteMultimodalModelClient({
     required this.endpoint,
     this.timeout = const Duration(seconds: 120),
+    this.includeSourceVideo = false,
   });
 
   final Uri endpoint;
   final Duration timeout;
+  final bool includeSourceVideo;
 
   @override
   bool get supportsDirectVideo => true;
@@ -31,7 +33,9 @@ class RemoteMultimodalModelClient implements ModelClient {
     try {
       final request = await client.postUrl(endpoint).timeout(timeout);
       request.headers.contentType = ContentType.json;
-      final videoBytes = await File(video.path).readAsBytes().timeout(timeout);
+      final videoBytes = includeSourceVideo
+          ? await File(video.path).readAsBytes().timeout(timeout)
+          : null;
       request.write(
         jsonEncode({
           'goal': goal,
@@ -43,12 +47,13 @@ class RemoteMultimodalModelClient implements ModelClient {
             'duration': video.duration.inMilliseconds / 1000,
             'aspectRatio': video.aspectRatio,
           },
-          'sourceVideo': {
-            'name': video.name,
-            'type': video.mimeType ?? 'video/mp4',
-            'data':
-                'data:${video.mimeType ?? 'video/mp4'};base64,${base64Encode(videoBytes)}',
-          },
+          if (videoBytes != null)
+            'sourceVideo': {
+              'name': video.name,
+              'type': video.mimeType ?? 'video/mp4',
+              'data':
+                  'data:${video.mimeType ?? 'video/mp4'};base64,${base64Encode(videoBytes)}',
+            },
           'frames': [
             for (final frame in frames)
               {

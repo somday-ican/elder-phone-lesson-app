@@ -98,7 +98,7 @@ void main() {
       expect(lesson.id, 'lesson_remote');
       expect(lesson.steps.single.action.target.x, 0.4);
       expect(receivedPayload['goal'], '生成老人教程');
-      expect(receivedPayload['sourceVideo'], isA<Map<String, Object?>>());
+      expect(receivedPayload.containsKey('sourceVideo'), isFalse);
       expect(receivedPayload['frames'], isA<List<Object?>>());
     },
   );

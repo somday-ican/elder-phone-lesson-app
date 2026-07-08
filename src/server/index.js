@@ -45,7 +45,8 @@ const server = createServer(async (req, res) => {
   } catch (error) {
     const statusCode = error.statusCode || 500;
     sendJson(res, statusCode, {
-      error: statusCode === 500 ? "Internal server error." : error.message
+      error: statusCode === 500 ? "Internal server error." : error.message,
+      details: statusCode === 500 && process.env.NODE_ENV !== "production" ? error.message : undefined
     });
   }
 });
