@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:image/image.dart' as img;
 
 import '../models/button_analysis.dart';
 import '../models/lesson.dart';
@@ -69,7 +72,7 @@ class RemoteMultimodalModelClient implements ModelClient {
               {
                 'index': frame.index,
                 'timeMs': frame.time.inMilliseconds,
-                'image': 'data:image/jpeg;base64,${base64Encode(frame.bytes)}',
+                'image': 'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
                 if (frame.touchTarget != null)
                   'touchCandidate': frame.touchTarget!.toJson(),
               },
@@ -148,6 +151,32 @@ class RemoteMultimodalModelClient implements ModelClient {
     ];
   }
 
+  /// Compress image for API — resizes to max 540px wide, JPEG quality 60,
+  /// returns base64 string. Reduces 300KB PNGs to ~15KB for faster API calls.
+  static String _compressForApi(Uint8List bytes) {
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) return base64Encode(bytes);
+
+      const maxWidth = 540;
+      final srcW = decoded.width;
+      final srcH = decoded.height;
+      final resized = srcW > maxWidth
+          ? img.copyResize(
+              decoded,
+              width: maxWidth,
+              height: (srcH * maxWidth / srcW).round(),
+              interpolation: img.Interpolation.linear,
+            )
+          : decoded;
+
+      final jpegBytes = img.encodeJpg(resized, quality: 60);
+      return base64Encode(jpegBytes);
+    } catch (_) {
+      return base64Encode(bytes);
+    }
+  }
+
   @override
   Future<UIPage?> generateUI({
     required List<VideoFrame> frames,
@@ -168,7 +197,7 @@ class RemoteMultimodalModelClient implements ModelClient {
               {
                 'index': frame.index,
                 'image':
-                    'data:image/jpeg;base64,${base64Encode(frame.bytes)}',
+                    'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
               },
           ],
           'markedPositions': [
@@ -215,7 +244,7 @@ class RemoteMultimodalModelClient implements ModelClient {
           'screenshot': {
             'index': frame.index,
             'image':
-                'data:image/jpeg;base64,${base64Encode(frame.bytes)}',
+                'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
           },
           'markedPosition': {'x': markedX, 'y': markedY},
           'goal': goal,
