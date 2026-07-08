@@ -252,6 +252,116 @@ class LocalTouchIndicatorDetector implements TouchIndicatorDetector {
   }
 }
 
+class RedCircleDetector implements TouchIndicatorDetector {
+  const RedCircleDetector({this.minConfidence = 0.25});
+
+  final double minConfidence;
+
+  @override
+  Future<List<TouchDetectionResult>> detect(List<VideoFrame> frames) async {
+    return detectSync(frames);
+  }
+
+  List<TouchDetectionResult> detectSync(List<VideoFrame> frames) {
+    final results = <TouchDetectionResult>[];
+
+    for (final frame in frames) {
+      final decoded = image.decodeImage(frame.bytes);
+      if (decoded == null) {
+        continue;
+      }
+      final candidate = _findRedCircle(decoded, frame.index);
+      if (candidate != null && candidate.confidence >= minConfidence) {
+        results.add(candidate);
+      }
+    }
+
+    return results;
+  }
+
+  TouchDetectionResult? _findRedCircle(image.Image frame, int frameIndex) {
+    final width = frame.width;
+    final height = frame.height;
+    if (width < 20 || height < 20) {
+      return null;
+    }
+
+    final sampleStep = math.max(1, (math.min(width, height) / 220).round());
+    final candidates = <_PixelCandidate>[];
+    final topInset = (height * 0.03).round();
+
+    for (var y = topInset; y < height; y += sampleStep) {
+      for (var x = 0; x < width; x += sampleStep) {
+        final pixel = frame.getPixel(x, y);
+        final redness = _redness(pixel);
+
+        if (redness > 0.62) {
+          final brightness = _brightness(pixel);
+          final contrast = _localContrast(frame, x, y, sampleStep * 4);
+          final score =
+              (redness * 0.55) + (contrast * 0.25) + ((1 - brightness) * 0.20);
+          if (score > 0.45) {
+            candidates.add(_PixelCandidate(x: x, y: y, score: score));
+          }
+        }
+      }
+    }
+
+    if (candidates.isEmpty) {
+      return null;
+    }
+
+    final clusters = _clusterCandidates(
+      candidates,
+      sampleStep * 10,
+      width,
+      height,
+    );
+    if (clusters.isEmpty) {
+      return null;
+    }
+
+    clusters.sort((a, b) => b.score.compareTo(a.score));
+    final cluster = clusters.first;
+    final diameter = cluster.diameter;
+    final minDiameter = math.min(width, height) * 0.02;
+    final maxDiameter = math.min(width, height) * 0.25;
+    if (diameter < minDiameter || diameter > maxDiameter) {
+      return null;
+    }
+
+    return TouchDetectionResult(
+      frameIndex: frameIndex,
+      target: RelativeTarget(
+        x: (cluster.centerX / width).clamp(0, 1).toDouble(),
+        y: (cluster.centerY / height).clamp(0, 1).toDouble(),
+        width: (diameter * 2.2 / width).clamp(0.06, 0.28).toDouble(),
+        height: (diameter * 2.2 / height).clamp(0.04, 0.20).toDouble(),
+        label: '红圈标注位置',
+      ),
+      confidence: cluster.score.clamp(0, 1).toDouble(),
+    );
+  }
+}
+
+double _redness(image.Pixel pixel) {
+  final r = pixel.r.toInt();
+  final g = pixel.g.toInt();
+  final b = pixel.b.toInt();
+
+  if (r < 90) {
+    return 0.0;
+  }
+
+  final rgDiff = (r - g) / 255;
+  final rbDiff = (r - b) / 255;
+  final rednessFromDiffs = ((rgDiff + rbDiff) / 2).clamp(0, 1).toDouble();
+  final rednessFromRatio =
+      (r / math.max(g + b, 1)).clamp(0, 1).toDouble();
+
+  return (rednessFromDiffs * 0.6 + rednessFromRatio * 0.4).clamp(0, 1);
+}
+
 class IsolateTouchIndicatorDetector implements TouchIndicatorDetector {
   const IsolateTouchIndicatorDetector({this.minConfidence = 0.2});
 

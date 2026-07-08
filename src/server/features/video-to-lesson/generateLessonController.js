@@ -30,6 +30,9 @@ export async function generateLessonController(req, res, config) {
     });
     return;
   }
+  if (request.value.frameSelection?.originalFrameCount && lesson?.source) {
+    lesson.source.frameCount = request.value.frameSelection.originalFrameCount;
+  }
   const validation = validator.validate(lesson);
 
   if (!validation.ok) {

@@ -6,7 +6,7 @@ export class ModelClient {
     this.apiKey = apiKey;
   }
 
-  async generate({ frames, sourceVideo, videoMeta, audience, goal, prompt }) {
+  async generate({ frames, sourceVideo, frameSelection, videoMeta, audience, goal, prompt }) {
     if (!this.baseUrl || !this.modelName || !this.apiKey) {
       throw new Error("AI_BASE_URL, AI_MODEL_NAME, and AI_API_KEY are required for remote generation.");
     }
@@ -28,7 +28,7 @@ export class ModelClient {
           },
           {
             role: "user",
-            content: buildUserContent({ frames, sourceVideo, videoMeta, audience, goal, prompt })
+            content: buildUserContent({ frames, sourceVideo, frameSelection, videoMeta, audience, goal, prompt })
           }
         ]
       })
@@ -57,11 +57,19 @@ function buildSystemPrompt() {
   ].join(" ");
 }
 
-function buildUserContent({ frames, sourceVideo, videoMeta, audience, goal, prompt }) {
+function buildUserContent({ frames, sourceVideo, frameSelection, videoMeta, audience, goal, prompt }) {
   const text = [
     "Analyze this smartphone operation recording from the sampled frame sequence and generate an elderly-friendly tutorial.",
-    "Use the image frames as the source of truth. Treat them as chronological samples from one screen recording.",
-    "If touchCandidate exists, use it only as a hint, not as the only source of truth.",
+    "Use the image frames as a chronological sequence from one screen recording.",
+    "The screen may contain many static white circles or buttons. Do not treat every white circle as a touch point.",
+    "A real touch indicator is usually a transient semi-transparent dot/ripple that appears, moves, or disappears between nearby frames.",
+    "Compare adjacent frames and prefer locations that changed over time.",
+    "If touchCandidate exists, use it as a strong temporal-difference hint, but verify it against the visual frame sequence.",
+    "Only create tutorial steps for meaningful user actions, not every provided frame.",
+    "Merge repeated frames or repeated touch candidates into one step.",
+    "Use frameIndex values from the original frame indexes shown before each image.",
+    `Original extracted frame count: ${frameSelection?.originalFrameCount ?? frames.length}`,
+    `Sent original frame indexes: ${JSON.stringify(frameSelection?.sentFrameIndexes || frames.map((frame, index) => getFrameIndex(frame, index)))}`,
     "Return JSON with exactly this top-level shape: { \"lesson\": { ... } }.",
     "Action type must be one of: tap, long_press, swipe, type, wait, observe.",
     "Coordinates must be relative 0..1. x and y are the center of the target.",
@@ -69,18 +77,24 @@ function buildUserContent({ frames, sourceVideo, videoMeta, audience, goal, prom
     `Audience: ${audience}`,
     `Video meta: ${JSON.stringify(videoMeta || {})}`,
     `Prompt preview: ${JSON.stringify(prompt?.user || {})}`,
-    `Frame touch candidates: ${JSON.stringify(frames.map(toFrameHint))}`,
+    `Frame touch candidates from local temporal differencing: ${JSON.stringify(frames.map(toFrameHint))}`,
     `Required lesson example: ${JSON.stringify(buildLessonExample(frames.length))}`
   ].join("\n\n");
 
   return [
     { type: "text", text },
-    ...frames.map((frame) => ({
-      type: "image_url",
-      image_url: {
-        url: getFrameImage(frame)
+    ...frames.flatMap((frame, index) => [
+      {
+        type: "text",
+        text: `Frame ${getFrameIndex(frame, index)} at ${getFrameTimeMs(frame) ?? "unknown"} ms. Touch candidate: ${JSON.stringify(getFrameTouchCandidate(frame) || null)}`
+      },
+      {
+        type: "image_url",
+        image_url: {
+          url: getFrameImage(frame)
+        }
       }
-    }))
+    ])
   ];
 }
 
@@ -123,6 +137,18 @@ function buildLessonExample(frameCount) {
 
 function getFrameImage(frame) {
   return typeof frame === "string" ? frame : frame.image;
+}
+
+function getFrameIndex(frame, fallback) {
+  return typeof frame === "string" ? fallback : frame.index;
+}
+
+function getFrameTimeMs(frame) {
+  return typeof frame === "string" ? undefined : frame.timeMs;
+}
+
+function getFrameTouchCandidate(frame) {
+  return typeof frame === "string" ? undefined : frame.touchCandidate;
 }
 
 function toFrameHint(frame, index) {

@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:video_player/video_player.dart';
 
 import 'generation/lesson_validator.dart';
 import 'generation/mock_lesson_generator.dart';
@@ -12,7 +11,6 @@ import 'generation/prompt_builder.dart';
 import 'generation/remote_multimodal_model_client.dart';
 import 'models/lesson.dart';
 import 'models/video_frame.dart';
-import 'video/frame_extractor.dart';
 import 'vision/touch_indicator_detector.dart';
 import 'widgets/frame_stage.dart';
 
@@ -23,7 +21,7 @@ class VideoToLessonApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '手机操作教程',
+      title: '手机截图教程',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF25705A),
@@ -32,7 +30,7 @@ class VideoToLessonApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF7F8F5),
         useMaterial3: true,
       ),
-      home: VideoToLessonPage(modelClient: _buildModelClient()),
+      home: ScreenshotLessonPage(modelClient: _buildModelClient()),
     );
   }
 
@@ -45,92 +43,105 @@ class VideoToLessonApp extends StatelessWidget {
   }
 }
 
-class VideoToLessonPage extends StatefulWidget {
-  const VideoToLessonPage({
+class ScreenshotLessonPage extends StatefulWidget {
+  const ScreenshotLessonPage({
     super.key,
     this.imagePicker,
-    this.frameExtractor = const FrameExtractor(),
     this.promptBuilder = const PromptBuilder(),
     this.modelClient = const MockLessonGenerator(),
     this.lessonValidator = const LessonValidator(),
-    this.touchIndicatorDetector = const IsolateTouchIndicatorDetector(),
+    this.redCircleDetector = const RedCircleDetector(),
   });
 
   final ImagePicker? imagePicker;
-  final FrameExtractor frameExtractor;
   final PromptBuilder promptBuilder;
   final ModelClient modelClient;
   final LessonValidator lessonValidator;
-  final TouchIndicatorDetector touchIndicatorDetector;
+  final RedCircleDetector redCircleDetector;
 
   @override
-  State<VideoToLessonPage> createState() => _VideoToLessonPageState();
+  State<ScreenshotLessonPage> createState() => _ScreenshotLessonPageState();
 }
 
-class _VideoToLessonPageState extends State<VideoToLessonPage> {
-  final _goalController = TextEditingController(text: '把视频里的手机操作讲成适合老人照做的步骤');
-  VideoPlayerController? _videoController;
-  SelectedVideo? _video;
-  List<VideoFrame> _frames = [];
+class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
+  final _goalController = TextEditingController(
+    text: '把截图里的手机操作讲成适合老人照做的步骤',
+  );
+  List<VideoFrame> _images = [];
   Lesson? _lesson;
-  int _selectedFrameIndex = 0;
+  int _selectedImageIndex = 0;
   int _activeStepIndex = 0;
   Timer? _playTimer;
+  Timer? _practiceTimer;
   bool _isPicking = false;
-  bool _isExtracting = false;
   bool _isGenerating = false;
-  bool _isDetectingTouches = false;
-  String _status = '请选择一段手机操作视频';
+  bool _isDetecting = false;
+  String _status = '请选择一组截图，然后逐张点击标记操作位置';
+
+  // Marking mode
+  bool _isMarking = false;
+  int _markingIndex = 0;
+
+  // Practice mode
+  bool _isPracticeMode = false;
+  int _practiceIndex = 0;
+  int _practiceCorrectCount = 0;
+  int _practiceWrongCount = 0;
 
   ImagePicker get _picker => widget.imagePicker ?? ImagePicker();
 
   @override
   void dispose() {
     _goalController.dispose();
-    _videoController?.dispose();
     _playTimer?.cancel();
+    _practiceTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _pickVideo() async {
+  // ── Pick images ─────────────────────────────────────────────────
+
+  Future<void> _pickImages() async {
     setState(() {
       _isPicking = true;
-      _status = '正在打开视频选择器';
+      _status = '正在打开图片选择器';
     });
 
     try {
-      final file = await _picker.pickVideo(source: ImageSource.gallery);
-      if (file == null) {
+      final files = await _picker.pickMultiImage(
+        imageQuality: 86,
+        requestFullMetadata: false,
+      );
+      if (files.isEmpty) {
         setState(() {
-          _status = '未选择视频';
+          _status = '未选择截图';
         });
         return;
       }
 
-      final controller = VideoPlayerController.file(File(file.path));
-      await controller.initialize();
-      await _videoController?.dispose();
+      final frames = <VideoFrame>[];
+      for (final indexed in files.indexed) {
+        final bytes = await File(indexed.$2.path).readAsBytes();
+        frames.add(
+          VideoFrame(
+            index: indexed.$1,
+            time: Duration(milliseconds: indexed.$1),
+            bytes: bytes,
+          ),
+        );
+      }
 
       setState(() {
-        _videoController = controller;
-        _video = SelectedVideo(
-          path: file.path,
-          name: _nameFromPath(file.path),
-          mimeType: file.mimeType,
-          duration: controller.value.duration,
-          aspectRatio: controller.value.aspectRatio,
-        );
-        _frames = [];
+        _images = frames;
         _lesson = null;
-        _selectedFrameIndex = 0;
+        _selectedImageIndex = 0;
         _activeStepIndex = 0;
-        _status = widget.modelClient.supportsDirectVideo
-            ? '已选择视频，可以直接 AI 生成教程'
-            : '已选择视频，可以抽取关键帧';
+        _isMarking = false;
+        _markingIndex = 0;
+        _status = '已选择 ${frames.length} 张截图，请点击「标注位置」逐张标记操作按钮';
       });
     } catch (error) {
       setState(() {
-        _status = '视频读取失败：$error';
+        _status = '图片读取失败：$error';
       });
     } finally {
       if (mounted) {
@@ -141,85 +152,188 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
     }
   }
 
-  Future<void> _extractFrames({bool detectTouches = true}) async {
-    final video = _video;
-    if (video == null) {
+  // ── Manual marking mode ─────────────────────────────────────────
+
+  int get _markedCount =>
+      _images.where((f) => f.touchTarget != null).length;
+
+  void _startMarking() {
+    if (_images.isEmpty) {
+      return;
+    }
+    setState(() {
+      _isMarking = true;
+      _markingIndex = 0;
+      _status = '点击图片中需要操作的位置来标记（第 1/${_images.length} 张）';
+    });
+  }
+
+  void _handleMarkTap(int imageIndex, Offset relativePosition) {
+    if (!_isMarking) {
+      return;
+    }
+
+    final frame = _images[imageIndex];
+    final updated = frame.copyWith(
+      touchTarget: RelativeTarget(
+        x: relativePosition.dx,
+        y: relativePosition.dy,
+        width: 0.16,
+        height: 0.10,
+        label: '第 ${imageIndex + 1} 步操作位置',
+      ),
+    );
+
+    setState(() {
+      _images = [
+        for (final f in _images)
+          if (f.index == imageIndex) updated else f,
+      ];
+      _status = '已标记第 ${imageIndex + 1} 张，点击继续标记或切换图片';
+    });
+  }
+
+  void _nextMarkingImage() {
+    if (_markingIndex >= _images.length - 1) {
+      _finishMarking();
+      return;
+    }
+    setState(() {
+      _markingIndex++;
+      _status = '点击图片中需要操作的位置来标记（第 ${_markingIndex + 1}/${_images.length} 张）';
+    });
+  }
+
+  void _prevMarkingImage() {
+    if (_markingIndex <= 0) {
+      return;
+    }
+    setState(() {
+      _markingIndex--;
+      _status = '点击图片中需要操作的位置来标记（第 ${_markingIndex + 1}/${_images.length} 张）';
+    });
+  }
+
+  void _jumpToMarkingImage(int index) {
+    setState(() {
+      _markingIndex = index.clamp(0, _images.length - 1);
+      _status = '点击图片中需要操作的位置来标记（第 ${_markingIndex + 1}/${_images.length} 张）';
+    });
+  }
+
+  void _clearCurrentMark() {
+    final frame = _images[_markingIndex];
+    setState(() {
+      _images = [
+        for (final f in _images)
+          if (f.index == frame.index)
+            frame.copyWith(clearTouchTarget: true)
+          else
+            f,
+      ];
+      _status = '已清除第 ${_markingIndex + 1} 张标记';
+    });
+  }
+
+  void _finishMarking() {
+    setState(() {
+      _isMarking = false;
+      _status = '标注完成！已标记 $_markedCount/${_images.length} 张，可以开始练习';
+    });
+  }
+
+  void _exitMarking() {
+    setState(() {
+      _isMarking = false;
+      _status = '已退出标注模式，已标记 $_markedCount 张';
+    });
+  }
+
+  // ── Auto-detect red circles (secondary) ─────────────────────────
+
+  Future<void> _detectRedCircles() async {
+    if (_images.isEmpty) {
       return;
     }
 
     setState(() {
-      _isExtracting = true;
-      _status = '正在抽取关键帧';
-      _lesson = null;
-      _selectedFrameIndex = 0;
-      _activeStepIndex = 0;
+      _isDetecting = true;
+      _status = '正在尝试自动识别红圈标注';
     });
 
     try {
-      final frames = await widget.frameExtractor.extract(video);
+      final detections = await widget.redCircleDetector.detect(_images);
+      final detectionsByFrame = {
+        for (final detection in detections) detection.frameIndex: detection,
+      };
+
+      int added = 0;
       setState(() {
-        _frames = frames;
-        _selectedFrameIndex = 0;
-        _status = frames.isEmpty
-            ? '未抽到关键帧'
-            : '已抽取 ${frames.length} 个关键帧，正在自动识别触摸点';
+        _images = [
+          for (final frame in _images)
+            if (detectionsByFrame.containsKey(frame.index) &&
+                frame.touchTarget == null)
+              frame.copyWith(
+                touchTarget: detectionsByFrame[frame.index]!.target,
+              )
+            else
+              frame,
+        ];
+        added = detections.length;
       });
-      if (frames.isNotEmpty && detectTouches) {
-        await _detectTouchTargets();
+
+      if (added > 0) {
+        setState(() {
+          _status = '自动识别到 $added 个红圈（仅补充未标注的图片），建议检查位置是否准确';
+        });
+      } else {
+        setState(() {
+          _status = '未识别到红圈，请使用手动标注模式';
+        });
       }
     } catch (error) {
       setState(() {
-        _status = '抽帧失败：$error';
+        _status = '红圈识别失败：$error';
       });
     } finally {
       if (mounted) {
         setState(() {
-          _isExtracting = false;
+          _isDetecting = false;
         });
       }
     }
   }
 
-  Future<void> _generateLesson() async {
-    final video = _video;
-    if (video == null) {
-      return;
-    }
+  // ── AI generate lesson ──────────────────────────────────────────
 
-    if (_frames.isEmpty && !widget.modelClient.supportsDirectVideo) {
-      await _extractFrames();
-      if (_frames.isEmpty) {
-        return;
-      }
+  Future<void> _generateLesson() async {
+    if (_images.isEmpty) {
+      return;
     }
 
     setState(() {
       _isGenerating = true;
-      _status = widget.modelClient.supportsDirectVideo
-          ? '正在上传视频给 AI 生成教程'
-          : '正在生成模拟教程';
+      _status = '正在让 AI 分析截图并生成教程';
     });
 
     try {
-      if (_frames.isEmpty && widget.modelClient.supportsDirectVideo) {
-        await _extractFrames(detectTouches: false);
-        if (mounted) {
-          setState(() {
-            _isGenerating = true;
-            _status = '正在上传视频给 AI 生成教程';
-          });
-        }
-      }
       final goal = _goalController.text.trim();
+      final source = SelectedVideo(
+        path: 'screenshots',
+        name: 'screenshots',
+        mimeType: 'image/jpeg',
+        duration: Duration(milliseconds: _images.length),
+        aspectRatio: 9 / 16,
+      );
       final prompt = widget.promptBuilder.build(
-        frames: _frames,
-        video: video,
+        frames: _images,
+        video: source,
         audience: 'elderly smartphone user',
         goal: goal,
       );
       final lesson = await widget.modelClient.generateLessonJson(
-        frames: _frames,
-        video: video,
+        frames: _images,
+        video: source,
         audience: 'elderly smartphone user',
         goal: goal,
         prompt: prompt,
@@ -247,48 +361,111 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
     }
   }
 
-  Future<void> _detectTouchTargets() async {
-    if (_frames.isEmpty) {
+  // ── Practice mode ───────────────────────────────────────────────
+
+  List<VideoFrame> get _framesWithTargets =>
+      _images.where((f) => f.touchTarget != null).toList();
+
+  void _startPractice() {
+    final targets = _framesWithTargets;
+    if (targets.isEmpty) {
+      setState(() {
+        _status = '请先标注操作位置再开始练习';
+      });
       return;
+    }
+    if (targets.length < _images.length) {
+      final proceed = _images.length - targets.length;
+      setState(() {
+        _status = '注意：还有 $proceed 张未标注，将只练习已标注的 ${targets.length} 张';
+      });
     }
 
     setState(() {
-      _isDetectingTouches = true;
-      _status = '正在识别录屏里的触摸圆点';
+      _isPracticeMode = true;
+      _practiceIndex = 0;
+      _practiceCorrectCount = 0;
+      _practiceWrongCount = 0;
+      _status = '练习模式：请点击图中标注的位置';
     });
+  }
 
-    try {
-      final detections = await widget.touchIndicatorDetector.detect(_frames);
-      final detectionsByFrame = {
-        for (final detection in detections) detection.frameIndex: detection,
-      };
+  void _handlePracticeTap(int imageIndex, bool correct) {
+    if (!_isPracticeMode) {
+      return;
+    }
+
+    if (correct) {
       setState(() {
-        _frames = [
-          for (final frame in _frames)
-            detectionsByFrame.containsKey(frame.index)
-                ? frame.copyWith(
-                    touchTarget: detectionsByFrame[frame.index]!.target,
-                  )
-                : frame.copyWith(clearTouchTarget: true),
-        ];
-        _lesson = null;
-        _activeStepIndex = 0;
-        _status = detections.isEmpty
-            ? '未识别到触摸点，可手动点选校准'
-            : '已自动识别 ${detections.length} 个触摸点，可直接生成教程';
+        _practiceCorrectCount++;
       });
-    } catch (error) {
+
+      _practiceTimer?.cancel();
+      _practiceTimer = Timer(const Duration(milliseconds: 900), () {
+        if (!mounted || !_isPracticeMode) {
+          return;
+        }
+        final targets = _framesWithTargets;
+        if (_practiceIndex >= targets.length - 1) {
+          _finishPractice();
+        } else {
+          setState(() {
+            _practiceIndex++;
+          });
+        }
+      });
+    } else {
       setState(() {
-        _status = '识别触摸点失败：$error';
+        _practiceWrongCount++;
       });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDetectingTouches = false;
-        });
-      }
     }
   }
+
+  void _finishPractice() {
+    _practiceTimer?.cancel();
+    setState(() {
+      _isPracticeMode = false;
+      _practiceIndex = 0;
+      _status = '练习完成！正确 $_practiceCorrectCount 次，错误 $_practiceWrongCount 次';
+    });
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.emoji_events, color: Colors.amber, size: 28),
+              SizedBox(width: 8),
+              Text('练习完成'),
+            ],
+          ),
+          content: Text(
+            '正确点击：$_practiceCorrectCount 次\n'
+            '错误点击：$_practiceWrongCount 次\n\n'
+            '${_practiceWrongCount == 0 ? "太棒了！你全部点对了！" : "继续加油，多练习几次就会熟悉的！"}',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('好的'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _exitPractice() {
+    _practiceTimer?.cancel();
+    setState(() {
+      _isPracticeMode = false;
+      _practiceIndex = 0;
+      _status = '已退出练习模式';
+    });
+  }
+
+  // ── Lesson navigation ──────────────────────────────────────────
 
   void _showStep(int index) {
     final lesson = _lesson;
@@ -300,53 +477,9 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
     });
   }
 
-  void _selectFrame(int index) {
+  void _selectImage(int index) {
     setState(() {
-      _selectedFrameIndex = index.clamp(0, _frames.length - 1);
-    });
-  }
-
-  void _markFrameTarget(Offset relativePosition) {
-    if (_frames.isEmpty) {
-      return;
-    }
-    final frame = _frames[_selectedFrameIndex];
-    final updatedFrame = frame.copyWith(
-      touchTarget: RelativeTarget(
-        x: relativePosition.dx,
-        y: relativePosition.dy,
-        width: 0.18,
-        height: 0.09,
-        label: '真实点击位置',
-      ),
-    );
-    setState(() {
-      _frames = [
-        for (final item in _frames)
-          if (item.index == frame.index) updatedFrame else item,
-      ];
-      _lesson = null;
-      _activeStepIndex = 0;
-      _status = '已标注第 ${frame.index + 1} 帧，可继续标注或生成教程';
-    });
-  }
-
-  void _clearFrameTarget() {
-    if (_frames.isEmpty) {
-      return;
-    }
-    final frame = _frames[_selectedFrameIndex];
-    setState(() {
-      _frames = [
-        for (final item in _frames)
-          if (item.index == frame.index)
-            frame.copyWith(clearTouchTarget: true)
-          else
-            item,
-      ];
-      _lesson = null;
-      _activeStepIndex = 0;
-      _status = '已清除第 ${frame.index + 1} 帧标注';
+      _selectedImageIndex = index.clamp(0, _images.length - 1);
     });
   }
 
@@ -378,27 +511,82 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
     }
   }
 
+  // ── Build ──────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    // Marking mode
+    if (_isMarking) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text('标注位置 ${_markingIndex + 1}/${_images.length}'),
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: _exitMarking,
+          ),
+          actions: [
+            if (_images[_markingIndex].touchTarget != null)
+              IconButton(
+                icon: const Icon(Icons.undo),
+                tooltip: '清除当前标注',
+                onPressed: _clearCurrentMark,
+              ),
+            IconButton(
+              icon: const Icon(Icons.check),
+              tooltip: '完成标注',
+              onPressed: _finishMarking,
+            ),
+          ],
+        ),
+        body: _buildMarkingView(),
+        bottomNavigationBar: _buildMarkingBottomBar(),
+      );
+    }
+
+    // Practice mode
+    if (_isPracticeMode) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(
+            '练习 ${_practiceIndex + 1}/${_framesWithTargets.length}',
+          ),
+          leading: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: _exitPractice,
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: Text(
+                  '✓$_practiceCorrectCount  ✗$_practiceWrongCount',
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
+            ),
+          ],
+        ),
+        body: _buildPracticeView(),
+      );
+    }
+
+    // Main page
     final lesson = _lesson;
     final activeStep = lesson == null ? null : lesson.steps[_activeStepIndex];
-    final activeFrame = activeStep == null || _frames.isEmpty
+    final activeFrame = activeStep == null || _images.isEmpty
         ? null
-        : _frames[activeStep.frameIndex.clamp(0, _frames.length - 1)];
-    final selectedFrame = _frames.isEmpty
+        : _images[activeStep.frameIndex.clamp(0, _images.length - 1)];
+    final selectedImage = _images.isEmpty
         ? null
-        : _frames[_selectedFrameIndex.clamp(0, _frames.length - 1)];
-    final markedCount = _frames
-        .where((frame) => frame.touchTarget != null)
-        .length;
+        : _images[_selectedImageIndex.clamp(0, _images.length - 1)];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('手机操作教程生成器'),
+        title: const Text('手机截图教程生成器'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: Center(child: Text('${_frames.length} 帧')),
+            child: Center(child: Text('${_images.length} 张')),
           ),
         ],
       ),
@@ -420,35 +608,25 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
             const SizedBox(height: 12),
             _ActionBar(
               isPicking: _isPicking,
-              isExtracting: _isExtracting,
               isGenerating: _isGenerating,
-              isDetectingTouches: _isDetectingTouches,
-              supportsDirectVideo: widget.modelClient.supportsDirectVideo,
-              hasVideo: _video != null,
-              hasFrames: _frames.isNotEmpty,
-              markedCount: markedCount,
-              onPickVideo: _pickVideo,
-              onExtractFrames: _extractFrames,
-              onDetectTouches: _detectTouchTargets,
+              isDetecting: _isDetecting,
+              hasImages: _images.isNotEmpty,
+              markedCount: _markedCount,
+              totalCount: _images.length,
+              onPickImages: _pickImages,
+              onStartMarking: _startMarking,
+              onDetectRedCircles: _detectRedCircles,
               onGenerateLesson: _generateLesson,
+              onStartPractice: _startPractice,
             ),
-            const SizedBox(height: 16),
-            if (_videoController != null)
-              _VideoPreview(controller: _videoController!),
-            if (_frames.isNotEmpty) ...[
+            if (selectedImage != null) ...[
               const SizedBox(height: 16),
-              if (widget.modelClient.supportsDirectVideo)
-                _FramePreviewPanel(frames: _frames)
-              else
-                _FrameAnnotationPanel(
-                  frames: _frames,
-                  selectedFrame: selectedFrame!,
-                  selectedFrameIndex: _selectedFrameIndex,
-                  aspectRatio: _video?.aspectRatio ?? 9 / 16,
-                  onSelectFrame: _selectFrame,
-                  onMarkTarget: _markFrameTarget,
-                  onClearTarget: _clearFrameTarget,
-                ),
+              _ImagePreviewPanel(
+                images: _images,
+                selectedImage: selectedImage,
+                selectedIndex: _selectedImageIndex,
+                onSelectImage: _selectImage,
+              ),
             ],
             const SizedBox(height: 16),
             if (lesson == null)
@@ -458,7 +636,6 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
                 lesson: lesson,
                 activeStepIndex: _activeStepIndex,
                 activeFrame: activeFrame,
-                aspectRatio: _video?.aspectRatio ?? 9 / 16,
                 isPlaying: _playTimer != null,
                 onPrevious: () => _showStep(_activeStepIndex - 1),
                 onNext: () => _showStep(_activeStepIndex + 1),
@@ -471,11 +648,300 @@ class _VideoToLessonPageState extends State<VideoToLessonPage> {
     );
   }
 
-  String _nameFromPath(String path) {
-    final parts = path.split(Platform.pathSeparator);
-    return parts.isEmpty ? 'selected-video.mp4' : parts.last;
+  // ── Marking view ────────────────────────────────────────────────
+
+  Widget _buildMarkingView() {
+    final frame = _images[_markingIndex];
+    final hasTarget = frame.touchTarget != null;
+
+    return SafeArea(
+      child: Column(
+        children: [
+          // Instruction
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Icon(
+                  hasTarget ? Icons.check_circle : Icons.touch_app,
+                  color: hasTarget ? Colors.green : Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    hasTarget
+                        ? '已标记 ✓ 点击其他位置可重新标记，或切换下一张'
+                        : '请点击截图中需要操作的按钮/位置',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Image with tap-to-mark
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: FrameStage(
+                key: ValueKey('mark_${frame.index}'),
+                frame: frame,
+                aspectRatio: 9 / 16,
+                target: frame.touchTarget,
+                onTapRelative: (pos) => _handleMarkTap(frame.index, pos),
+              ),
+            ),
+          ),
+          // Hint
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '点击图片中需要操作的位置，黄色框会显示标记区域',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMarkingBottomBar() {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Row(
+          children: [
+            IconButton.filledTonal(
+              onPressed: _markingIndex > 0 ? _prevMarkingImage : null,
+              icon: const Icon(Icons.chevron_left),
+              tooltip: '上一张',
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 56,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _images.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 4),
+                  itemBuilder: (context, index) {
+                    final frame = _images[index];
+                    final isCurrent = index == _markingIndex;
+                    final isMarked = frame.touchTarget != null;
+                    return GestureDetector(
+                      onTap: () => _jumpToMarkingImage(index),
+                      child: Container(
+                        width: 44,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isCurrent
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.transparent,
+                            width: 2.5,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.memory(
+                                frame.bytes,
+                                fit: BoxFit.cover,
+                              ),
+                              if (isMarked)
+                                Positioned(
+                                  top: 2,
+                                  right: 2,
+                                  child: Container(
+                                    width: 14,
+                                    height: 14,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.green,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.check,
+                                      color: Colors.white,
+                                      size: 10,
+                                    ),
+                                  ),
+                                ),
+                              Container(
+                                alignment: Alignment.bottomCenter,
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 1,
+                                  ),
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  child: Text(
+                                    '${index + 1}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              onPressed: _markingIndex < _images.length - 1
+                  ? _nextMarkingImage
+                  : _finishMarking,
+              icon: Icon(
+                _markingIndex < _images.length - 1
+                    ? Icons.chevron_right
+                    : Icons.check,
+              ),
+              tooltip: _markingIndex < _images.length - 1 ? '下一张' : '完成',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Practice view ───────────────────────────────────────────────
+
+  Widget _buildPracticeView() {
+    final targets = _framesWithTargets;
+    if (targets.isEmpty) {
+      return const Center(child: Text('没有可练习的步骤'));
+    }
+
+    final frame = targets[_practiceIndex];
+    final target = frame.touchTarget;
+    return SafeArea(
+      child: Column(
+        children: [
+          // Progress bar
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                for (var i = 0; i < targets.length; i++)
+                  Expanded(
+                    child: Container(
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(3),
+                        color: i < _practiceIndex
+                            ? Colors.green
+                            : i == _practiceIndex
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.grey.shade300,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // Instruction
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.touch_app, color: Colors.orange),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '请点击图中标注的按钮位置（第 ${_practiceIndex + 1} 步）',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Interactive image
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: FrameStage(
+                key: ValueKey('practice_${frame.index}_$_practiceIndex'),
+                frame: frame,
+                aspectRatio: 9 / 16,
+                target: target,
+                interactive: true,
+                hitRadius: 0.14,
+                onPracticeResult: (correct) {
+                  _handlePracticeTap(frame.index, correct);
+                },
+              ),
+            ),
+          ),
+          // Feedback
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: _practiceIndex < _practiceCorrectCount
+                ? Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green),
+                        SizedBox(width: 8),
+                        Text(
+                          '很好！点对了！',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
   }
 }
+
+// ── Sub-widgets ───────────────────────────────────────────────────
 
 class _StatusPanel extends StatelessWidget {
   const _StatusPanel({required this.status});
@@ -509,69 +975,66 @@ class _StatusPanel extends StatelessWidget {
 class _ActionBar extends StatelessWidget {
   const _ActionBar({
     required this.isPicking,
-    required this.isExtracting,
     required this.isGenerating,
-    required this.isDetectingTouches,
-    required this.supportsDirectVideo,
-    required this.hasVideo,
-    required this.hasFrames,
+    required this.isDetecting,
+    required this.hasImages,
     required this.markedCount,
-    required this.onPickVideo,
-    required this.onExtractFrames,
-    required this.onDetectTouches,
+    required this.totalCount,
+    required this.onPickImages,
+    required this.onStartMarking,
+    required this.onDetectRedCircles,
     required this.onGenerateLesson,
+    required this.onStartPractice,
   });
 
   final bool isPicking;
-  final bool isExtracting;
   final bool isGenerating;
-  final bool isDetectingTouches;
-  final bool supportsDirectVideo;
-  final bool hasVideo;
-  final bool hasFrames;
+  final bool isDetecting;
+  final bool hasImages;
   final int markedCount;
-  final VoidCallback onPickVideo;
-  final VoidCallback onExtractFrames;
-  final VoidCallback onDetectTouches;
+  final int totalCount;
+  final VoidCallback onPickImages;
+  final VoidCallback onStartMarking;
+  final VoidCallback onDetectRedCircles;
   final VoidCallback onGenerateLesson;
+  final VoidCallback onStartPractice;
 
   @override
   Widget build(BuildContext context) {
-    final busy =
-        isPicking || isExtracting || isGenerating || isDetectingTouches;
+    final busy = isPicking || isGenerating || isDetecting;
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
         FilledButton.icon(
-          onPressed: busy ? null : onPickVideo,
-          icon: const Icon(Icons.video_library),
-          label: Text(isPicking ? '选择中' : '选择视频'),
+          onPressed: busy ? null : onPickImages,
+          icon: const Icon(Icons.photo_library_outlined),
+          label: Text(isPicking ? '选择中' : '选择截图'),
         ),
         FilledButton.tonalIcon(
-          onPressed: busy || !hasVideo || supportsDirectVideo
-              ? null
-              : onExtractFrames,
-          icon: const Icon(Icons.auto_awesome_motion),
-          label: Text(isExtracting ? '抽帧中' : '抽取关键帧'),
+          onPressed: busy || !hasImages ? null : onStartMarking,
+          icon: const Icon(Icons.edit_location_alt),
+          label: Text('标注位置 ($markedCount/$totalCount)'),
         ),
         FilledButton.tonalIcon(
-          onPressed: busy || !hasFrames || supportsDirectVideo
-              ? null
-              : onDetectTouches,
-          icon: const Icon(Icons.touch_app),
-          label: Text(isDetectingTouches ? '识别中' : '识别触摸点'),
+          onPressed: busy || !hasImages ? null : onDetectRedCircles,
+          icon: const Icon(Icons.auto_fix_high),
+          label: Text(isDetecting ? '识别中' : '自动识别红圈'),
         ),
+        const SizedBox(width: 4),
         FilledButton.tonalIcon(
-          onPressed: busy || !hasVideo ? null : onGenerateLesson,
+          onPressed: busy || !hasImages ? null : onGenerateLesson,
           icon: const Icon(Icons.school),
-          label: Text(
-            isGenerating
-                ? '生成中'
-                : supportsDirectVideo
-                ? 'AI 生成教程'
-                : '生成教程 ($markedCount)',
+          label: Text(isGenerating ? '生成中' : 'AI 生成教程'),
+        ),
+        FilledButton.icon(
+          onPressed: busy || markedCount == 0 ? null : onStartPractice,
+          icon: const Icon(Icons.play_circle),
+          label: Text('开始练习 ($markedCount)'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.green.shade600,
+            foregroundColor: Colors.white,
           ),
         ),
       ],
@@ -579,104 +1042,18 @@ class _ActionBar extends StatelessWidget {
   }
 }
 
-class _VideoPreview extends StatelessWidget {
-  const _VideoPreview({required this.controller});
-
-  final VideoPlayerController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('视频预览', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: AspectRatio(
-            aspectRatio: controller.value.aspectRatio,
-            child: VideoPlayer(controller),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _FramePreviewPanel extends StatelessWidget {
-  const _FramePreviewPanel({required this.frames});
-
-  final List<VideoFrame> frames;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('AI 分析预览帧', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 104,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: frames.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final frame = frames[index];
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Stack(
-                  alignment: Alignment.bottomLeft,
-                  children: [
-                    Image.memory(
-                      frame.bytes,
-                      width: 82,
-                      height: 104,
-                      fit: BoxFit.cover,
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      color: Colors.black.withValues(alpha: 0.55),
-                      child: Text(
-                        '${(frame.time.inMilliseconds / 1000).toStringAsFixed(1)}s',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _FrameAnnotationPanel extends StatelessWidget {
-  const _FrameAnnotationPanel({
-    required this.frames,
-    required this.selectedFrame,
-    required this.selectedFrameIndex,
-    required this.aspectRatio,
-    required this.onSelectFrame,
-    required this.onMarkTarget,
-    required this.onClearTarget,
+class _ImagePreviewPanel extends StatelessWidget {
+  const _ImagePreviewPanel({
+    required this.images,
+    required this.selectedImage,
+    required this.selectedIndex,
+    required this.onSelectImage,
   });
 
-  final List<VideoFrame> frames;
-  final VideoFrame selectedFrame;
-  final int selectedFrameIndex;
-  final double aspectRatio;
-  final ValueChanged<int> onSelectFrame;
-  final ValueChanged<Offset> onMarkTarget;
-  final VoidCallback onClearTarget;
+  final List<VideoFrame> images;
+  final VideoFrame selectedImage;
+  final int selectedIndex;
+  final ValueChanged<int> onSelectImage;
 
   @override
   Widget build(BuildContext context) {
@@ -685,47 +1062,39 @@ class _FrameAnnotationPanel extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
-              child: Text(
-                '标注真实操作位置',
-                style: Theme.of(context).textTheme.titleMedium,
+            Text('截图预览', style: Theme.of(context).textTheme.titleMedium),
+            const Spacer(),
+            if (selectedImage.touchTarget != null)
+              Chip(
+                avatar: const Icon(Icons.check_circle,
+                    color: Colors.green, size: 16),
+                label: Text(
+                  selectedImage.touchTarget!.label ?? '已标注',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                backgroundColor: Colors.green.shade50,
               ),
-            ),
-            TextButton.icon(
-              onPressed: selectedFrame.touchTarget == null
-                  ? null
-                  : onClearTarget,
-              icon: const Icon(Icons.backspace_outlined),
-              label: const Text('清除'),
-            ),
           ],
         ),
         const SizedBox(height: 8),
         FrameStage(
-          frame: selectedFrame,
-          aspectRatio: aspectRatio,
-          target: selectedFrame.touchTarget,
-          onTapRelative: onMarkTarget,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          selectedFrame.touchTarget == null
-              ? '未识别到时，可在上方画面点一下校准'
-              : '${selectedFrame.touchTarget!.label ?? '触摸点'}：x=${selectedFrame.touchTarget!.x.toStringAsFixed(2)}, y=${selectedFrame.touchTarget!.y.toStringAsFixed(2)}',
-          style: Theme.of(context).textTheme.bodySmall,
+          frame: selectedImage,
+          aspectRatio: 9 / 16,
+          target: selectedImage.touchTarget,
         ),
         const SizedBox(height: 8),
         SizedBox(
           height: 104,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: frames.length,
+            itemCount: images.length,
             separatorBuilder: (_, _) => const SizedBox(width: 8),
             itemBuilder: (context, index) {
-              final frame = frames[index];
-              final selected = index == selectedFrameIndex;
+              final frame = images[index];
+              final selected = index == selectedIndex;
+              final hasTarget = frame.touchTarget != null;
               return InkWell(
-                onTap: () => onSelectFrame(index),
+                onTap: () => onSelectImage(index),
                 borderRadius: BorderRadius.circular(8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -748,14 +1117,14 @@ class _FrameAnnotationPanel extends StatelessWidget {
                           height: 104,
                           fit: BoxFit.cover,
                         ),
-                        if (frame.touchTarget != null)
+                        if (hasTarget)
                           const Positioned(
                             top: 5,
                             right: 5,
                             child: Icon(
                               Icons.check_circle,
-                              color: Colors.lightGreenAccent,
-                              size: 22,
+                              color: Colors.green,
+                              size: 18,
                             ),
                           ),
                         Container(
@@ -765,7 +1134,7 @@ class _FrameAnnotationPanel extends StatelessWidget {
                           ),
                           color: Colors.black.withValues(alpha: 0.55),
                           child: Text(
-                            '${(frame.time.inMilliseconds / 1000).toStringAsFixed(1)}s',
+                            '${index + 1}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
@@ -808,7 +1177,6 @@ class _LessonPanel extends StatelessWidget {
     required this.lesson,
     required this.activeStepIndex,
     required this.activeFrame,
-    required this.aspectRatio,
     required this.isPlaying,
     required this.onPrevious,
     required this.onNext,
@@ -819,7 +1187,6 @@ class _LessonPanel extends StatelessWidget {
   final Lesson lesson;
   final int activeStepIndex;
   final VideoFrame? activeFrame;
-  final double aspectRatio;
   final bool isPlaying;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
@@ -840,7 +1207,7 @@ class _LessonPanel extends StatelessWidget {
         if (activeFrame != null)
           FrameStage(
             frame: activeFrame!,
-            aspectRatio: aspectRatio,
+            aspectRatio: 9 / 16,
             target: step.action.target,
           ),
         const SizedBox(height: 12),

@@ -6,7 +6,7 @@ import '../models/video_frame.dart';
 
 class FrameExtractor {
   const FrameExtractor({
-    this.maxFrames = 16,
+    this.maxFrames = 24,
     this.maxWidth = 540,
     this.quality = 68,
   });
@@ -21,7 +21,7 @@ class FrameExtractor {
     final safeDurationMs = durationMs > 0 ? durationMs : 1000;
     final count = math.min(
       maxFrames,
-      math.max(4, (safeDurationMs / 450).ceil()),
+      math.max(4, (safeDurationMs / 250).ceil()),
     );
     final frames = <VideoFrame>[];
 

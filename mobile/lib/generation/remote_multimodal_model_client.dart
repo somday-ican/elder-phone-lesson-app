@@ -31,6 +31,7 @@ class RemoteMultimodalModelClient implements ModelClient {
     final client = HttpClient()..connectionTimeout = timeout;
 
     try {
+      final selectedFrames = _selectFramesForModel(frames);
       final request = await client.postUrl(endpoint).timeout(timeout);
       request.headers.contentType = ContentType.json;
       final videoBytes = includeSourceVideo
@@ -54,8 +55,15 @@ class RemoteMultimodalModelClient implements ModelClient {
               'data':
                   'data:${video.mimeType ?? 'video/mp4'};base64,${base64Encode(videoBytes)}',
             },
+          'frameSelection': {
+            'originalFrameCount': frames.length,
+            'sentFrameIndexes': [
+              for (final frame in selectedFrames) frame.index,
+            ],
+            'strategy': 'touch-events-with-neighbor-context',
+          },
           'frames': [
-            for (final frame in frames)
+            for (final frame in selectedFrames)
               {
                 'index': frame.index,
                 'timeMs': frame.time.inMilliseconds,
@@ -95,5 +103,46 @@ class RemoteMultimodalModelClient implements ModelClient {
     } finally {
       client.close(force: true);
     }
+  }
+
+  List<VideoFrame> _selectFramesForModel(List<VideoFrame> frames) {
+    if (frames.length <= 8) {
+      return frames;
+    }
+
+    final touchIndexes = frames
+        .where((frame) => frame.touchTarget != null)
+        .map((frame) => frame.index)
+        .toSet();
+    if (touchIndexes.isNotEmpty) {
+      final selectedIndexes = <int>{};
+      for (final index in touchIndexes) {
+        selectedIndexes.add((index - 1).clamp(0, frames.length - 1).toInt());
+        selectedIndexes.add(index.clamp(0, frames.length - 1).toInt());
+        selectedIndexes.add((index + 1).clamp(0, frames.length - 1).toInt());
+      }
+
+      final selected = [
+        for (final index in selectedIndexes.toList()..sort()) frames[index],
+      ];
+      if (selected.length <= 12) {
+        return selected;
+      }
+      return [
+        for (final index in _evenIndexes(selected.length, 12)) selected[index],
+      ];
+    }
+
+    return [for (final index in _evenIndexes(frames.length, 8)) frames[index]];
+  }
+
+  List<int> _evenIndexes(int length, int count) {
+    if (length <= count) {
+      return [for (var index = 0; index < length; index += 1) index];
+    }
+    return [
+      for (var index = 0; index < count; index += 1)
+        ((length - 1) * index / (count - 1)).round(),
+    ];
   }
 }

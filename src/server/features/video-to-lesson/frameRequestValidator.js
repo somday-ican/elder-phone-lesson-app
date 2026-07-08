@@ -46,10 +46,31 @@ export function validateGenerateLessonRequest(body, config) {
     value: {
       frames: frames.map(normalizeFrame),
       sourceVideo,
+      frameSelection: normalizeFrameSelection(body.frameSelection, frames.length),
       videoMeta: normalizeVideoMeta(body.videoMeta),
       audience: typeof body.audience === "string" ? body.audience.slice(0, 120) : "elderly smartphone user",
       goal: typeof body.goal === "string" ? body.goal.slice(0, 200) : "Explain the phone operation shown in the video."
     }
+  };
+}
+
+function normalizeFrameSelection(frameSelection, fallbackFrameCount) {
+  if (!frameSelection || typeof frameSelection !== "object") {
+    return {
+      originalFrameCount: fallbackFrameCount,
+      sentFrameIndexes: [],
+      strategy: "unknown"
+    };
+  }
+
+  return {
+    originalFrameCount: Number.isInteger(frameSelection.originalFrameCount)
+      ? frameSelection.originalFrameCount
+      : fallbackFrameCount,
+    sentFrameIndexes: Array.isArray(frameSelection.sentFrameIndexes)
+      ? frameSelection.sentFrameIndexes.filter(Number.isInteger).slice(0, 80)
+      : [],
+    strategy: stringOrUndefined(frameSelection.strategy, 80)
   };
 }
 
