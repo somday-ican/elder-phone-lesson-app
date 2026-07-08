@@ -1,0 +1,14 @@
+{
+  "name": "hackthon-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/server/index.js",
+    "start": "node src/server/index.js",
+    "check": "node --check src/server/index.js && node --check src/server/features/video-to-lesson/mockLessonGenerator.js && node --check src/server/features/video-to-lesson/promptBuilder.js && node --check src/server/features/video-to-lesson/modelClient.js && node --check src/server/features/video-to-lesson/lessonValidator.js && node --check src/shared/lessonSchema.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

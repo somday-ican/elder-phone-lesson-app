@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>视频生成老人手机操作指导教程</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <div class="panel uploader">
+          <div class="panel-header">
+            <h1>视频生成老人手机操作指导教程</h1>
+            <span id="statusBadge" class="status-badge">等待视频</span>
+          </div>
+
+          <label class="drop-zone" for="videoInput">
+            <input id="videoInput" type="file" accept="video/*">
+            <span class="drop-title">选择手机操作视频</span>
+            <span class="drop-subtitle">本地抽取关键帧，第一版使用 mock 生成教程</span>
+          </label>
+
+          <video id="videoPreview" class="video-preview" controls muted playsinline></video>
+
+          <div class="controls">
+            <label>
+              教程目标
+              <input id="goalInput" type="text" value="把视频里的手机操作讲成适合老人照做的步骤">
+            </label>
+            <button id="extractButton" type="button" disabled>抽帧</button>
+            <button id="generateButton" type="button" disabled>生成教程</button>
+          </div>
+        </div>
+
+        <div class="panel frames-panel">
+          <div class="panel-header">
+            <h2>预览帧</h2>
+            <span id="frameCount">0 帧</span>
+          </div>
+          <div id="framesGrid" class="frames-grid"></div>
+        </div>
+      </section>
+
+      <section class="lesson-stage">
+        <div class="lesson-viewer">
+          <div class="phone-frame">
+            <img id="activeFrame" alt="当前步骤画面">
+            <div id="targetBox" class="target-box" hidden></div>
+          </div>
+
+          <div class="lesson-panel">
+            <div class="panel-header">
+              <h2 id="lessonTitle">等待生成</h2>
+              <span id="stepCounter">0 / 0</span>
+            </div>
+            <p id="lessonSummary" class="summary">上传视频并生成后，这里会显示操作教程。</p>
+            <div class="step-copy">
+              <h3 id="stepTitle">暂无步骤</h3>
+              <p id="stepInstruction">请选择视频开始。</p>
+              <p id="stepTip" class="tip"></p>
+            </div>
+            <div class="playback-controls">
+              <button id="prevStepButton" type="button" disabled>上一步</button>
+              <button id="playButton" type="button" disabled>播放步骤</button>
+              <button id="nextStepButton" type="button" disabled>下一步</button>
+            </div>
+            <ol id="stepsList" class="steps-list"></ol>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/video-to-lesson.js"></script>
+  </body>
+</html>
