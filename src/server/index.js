@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { getConfig } from "./config.js";
 import { sendJson } from "./http/sendJson.js";
 import { generateLessonController } from "./features/video-to-lesson/generateLessonController.js";
+import { analyzeButtonController } from "./features/button-analysis/analyzeButtonController.js";
+import { generateUIController } from "./features/ui-generation/generateUIController.js";
 
 const rootDir = fileURLToPath(new URL("../..", import.meta.url));
 const publicDir = join(rootDir, "public");
@@ -25,6 +27,16 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/lessons/generate") {
       await generateLessonController(req, res, config);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/analyze-button") {
+      await analyzeButtonController(req, res, config);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/generate-ui") {
+      await generateUIController(req, res, config);
       return;
     }
 

@@ -1,0 +1,82 @@
+export function buildUIGenerationPrompt({ screenshots, markedPositions, goal }) {
+  const system = [
+    "You are a mobile UI reconstruction expert. Your task is to analyze screenshots and generate a complete, interactive UI description.",
+    "The UI description should faithfully represent the app interface shown in the screenshots.",
+    "Focus on what's ACTUALLY visible in the screenshots — don't invent elements that aren't there.",
+    "Use Chinese for all text labels and descriptions.",
+    "Return ONLY valid JSON matching the specified schema. No markdown, no explanation.",
+    "All colors should be in hex format (#RRGGBB).",
+    "All coordinates and dimensions are relative (0..1)."
+  ].join(" ");
+
+  const marksInfo = markedPositions
+    .map((m, i) => `  Screenshot ${i + 1}: marked at (${m.x.toFixed(3)}, ${m.y.toFixed(3)})`)
+    .join('\n');
+
+  const user = [
+    'Analyze this sequence of ${screenshots.length} mobile app screenshots.',
+    goal ? `Context — the user wants to teach an elderly person to: ${goal}` : '',
+    '',
+    'The user marked these positions as the buttons/controls they want the elderly person to practice clicking:',
+    marksInfo,
+    '',
+    'Generate a complete widget description JSON for a reconstructed interactive UI page.',
+    'The UI should resemble the first screenshot (the starting page), but simplified for clarity.',
+    '',
+    'Include these elements:',
+    '1. An appBar with the title and any navigation buttons visible',
+    '2. The main body content (lists, buttons, text, images, etc.)',
+    '3. Mark the target buttons (that the user should click) with "isTarget": true',
+    '4. Extract real colors, text, and styles from the screenshots',
+    '',
+    'For each target button, include:',
+    '- The exact text shown on the button',
+    '- The button\'s background color (hex)',
+    '- stepIndex matching the marked order (1-based)',
+    '- a brief instruction for the elderly person',
+    '',
+    'Widget types you can use:',
+    'text, button, outlinedButton, listTile, switch, icon, iconButton,',
+    'divider, card, textField, image, avatar, chip, column, row, appBar',
+    '',
+    'Return this JSON shape:',
+    '{',
+    '  "page": {',
+    '    "title": "页面标题",',
+    '    "backgroundColor": "#F5F5F5",',
+    '    "appBar": {',
+    '      "title": "设置",',
+    '      "showBackButton": true,',
+    '      "actions": [',
+    '        {"type": "iconButton", "icon": "search", "label": "搜索"}',
+    '      ]',
+    '    },',
+    '    "body": {',
+    '      "type": "column",',
+    '      "children": [',
+    '        {',
+    '          "type": "listTile",',
+    '          "leading": {"type": "icon", "name": "wifi"},',
+    '          "title": "Wi-Fi",',
+    '          "isTarget": false',
+    '        },',
+    '        {"type": "divider"},',
+    '        {',
+    '          "type": "button",',
+    '          "label": "发送消息",',
+    '          "backgroundColor": "#07C160",',
+    '          "textColor": "#FFFFFF",',
+    '          "borderRadius": 10,',
+    '          "fontSize": 17,',
+    '          "isTarget": true,',
+    '          "stepIndex": 1,',
+    '          "instruction": "请点击绿色「发送消息」按钮"',
+    '        }',
+    '      ]',
+    '    }',
+    '  }',
+    '}'
+  ].filter(Boolean).join('\n');
+
+  return { system, user };
+}

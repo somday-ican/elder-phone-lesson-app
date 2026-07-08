@@ -1,4 +1,6 @@
+import '../models/button_analysis.dart';
 import '../models/lesson.dart';
+import '../models/ui_description.dart';
 import '../models/video_frame.dart';
 import 'model_client.dart';
 import 'prompt_builder.dart';
@@ -162,6 +164,75 @@ class MockLessonGenerator implements ModelClient {
             elderTip: '点击后先等一两秒，看到页面变化后再继续下一步。',
           ),
       ],
+    );
+  }
+
+  @override
+  Future<UIPage?> generateUI({
+    required List<VideoFrame> frames,
+    required List<({double x, double y})> markedPositions,
+    required String goal,
+  }) async {
+    return UIPage(
+      title: '操作练习',
+      backgroundColor: '#F2F2F7',
+      appBar: const UIAppBar(
+        title: '操作练习',
+        showBackButton: false,
+      ),
+      body: UIWidget(
+        type: 'column',
+        children: [
+          const UIWidget(
+            type: 'text',
+            content: '请依次点击下面的按钮，完成操作',
+            fontSize: 16,
+            fontWeight: 'bold',
+            color: '#333333',
+          ),
+          const UIWidget(type: 'divider'),
+          ...markedPositions.asMap().entries.map((e) => UIWidget(
+                type: 'button',
+                label: '步骤 ${e.key + 1}',
+                backgroundColor: '#007AFF',
+                textColor: '#FFFFFF',
+                borderRadius: 12,
+                fontSize: 17,
+                fontWeight: 'bold',
+                isTarget: true,
+                stepIndex: e.key + 1,
+                instruction: '请点击「步骤 ${e.key + 1}」按钮',
+              )),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Future<ButtonAnalysis?> analyzeButton({
+    required VideoFrame frame,
+    required double markedX,
+    required double markedY,
+    required String goal,
+  }) async {
+    return ButtonAnalysis(
+      boundingBox: BoundingBox(
+        x: (markedX * 1000).roundToDouble() / 1000,
+        y: (markedY * 1000).roundToDouble() / 1000,
+        width: 0.16,
+        height: 0.07,
+      ),
+      label: '按钮',
+      actionDescription: '点击进入下一步操作',
+      instruction: '请点击屏幕中标注位置的按钮',
+      elderTip: '如果不确定，可以先观察按钮上的文字再点击',
+      buttonStyle: const ButtonStyleInfo(
+        backgroundColor: '#007AFF',
+        textColor: '#FFFFFF',
+        borderRadius: 12,
+        fontSize: 17,
+        fontWeight: 'bold',
+      ),
     );
   }
 }

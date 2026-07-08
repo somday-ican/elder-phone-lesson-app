@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../models/button_analysis.dart';
 import '../models/lesson.dart';
+import '../models/ui_description.dart';
 import '../models/video_frame.dart';
 import 'model_client.dart';
 import 'prompt_builder.dart';
@@ -144,5 +146,100 @@ class RemoteMultimodalModelClient implements ModelClient {
       for (var index = 0; index < count; index += 1)
         ((length - 1) * index / (count - 1)).round(),
     ];
+  }
+
+  @override
+  Future<UIPage?> generateUI({
+    required List<VideoFrame> frames,
+    required List<({double x, double y})> markedPositions,
+    required String goal,
+  }) async {
+    final url = Uri.parse('${endpoint.origin}/api/generate-ui');
+    final client = HttpClient()..connectionTimeout = timeout;
+    final uiTimeout = timeout * 2;
+
+    try {
+      final request = await client.postUrl(url).timeout(uiTimeout);
+      request.headers.contentType = ContentType.json;
+      request.write(
+        jsonEncode({
+          'screenshots': [
+            for (final frame in frames)
+              {
+                'index': frame.index,
+                'image':
+                    'data:image/jpeg;base64,${base64Encode(frame.bytes)}',
+              },
+          ],
+          'markedPositions': [
+            for (final pos in markedPositions)
+              {'x': pos.x, 'y': pos.y},
+          ],
+          'goal': goal,
+        }),
+      );
+
+      final response = await request.close().timeout(uiTimeout);
+      final body = await utf8.decoder.bind(response).join().timeout(uiTimeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'UI generation API returned ${response.statusCode}: $body',
+          uri: url,
+        );
+      }
+
+      final payload = jsonDecode(body) as Map<String, Object?>;
+      final pageJson = (payload['page'] as Map?)?.cast<String, Object?>();
+      if (pageJson == null) return null;
+      return UIPage.fromJson(pageJson);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  @override
+  Future<ButtonAnalysis?> analyzeButton({
+    required VideoFrame frame,
+    required double markedX,
+    required double markedY,
+    required String goal,
+  }) async {
+    final url = Uri.parse('${endpoint.origin}/api/analyze-button');
+    final client = HttpClient()..connectionTimeout = timeout;
+
+    try {
+      final request = await client.postUrl(url).timeout(timeout);
+      request.headers.contentType = ContentType.json;
+      request.write(
+        jsonEncode({
+          'screenshot': {
+            'index': frame.index,
+            'image':
+                'data:image/jpeg;base64,${base64Encode(frame.bytes)}',
+          },
+          'markedPosition': {'x': markedX, 'y': markedY},
+          'goal': goal,
+        }),
+      );
+
+      final response = await request.close().timeout(timeout);
+      final body = await utf8.decoder.bind(response).join().timeout(timeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'Button analysis API returned ${response.statusCode}: $body',
+          uri: url,
+        );
+      }
+
+      final payload = jsonDecode(body) as Map<String, Object?>;
+      final analysisJson =
+          (payload['analysis'] as Map?)?.cast<String, Object?>();
+      if (analysisJson == null) {
+        return null;
+      }
+      return ButtonAnalysis.fromJson(analysisJson);
+    } finally {
+      client.close(force: true);
+    }
   }
 }
