@@ -201,7 +201,7 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
           builder: (_) => UIPracticePage(
             html: result.html,
             title: result.title,
-            targetCount: 3,
+            targetCount: _images.length,
           ),
         ),
       );
