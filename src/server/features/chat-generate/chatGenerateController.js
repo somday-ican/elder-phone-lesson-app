@@ -46,6 +46,7 @@ export async function chatGenerateController(req, res, config) {
       body: JSON.stringify({
         model: config.aiModelName,
         temperature: 0.35,
+        top_p: 0.9,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: prompt.system },
