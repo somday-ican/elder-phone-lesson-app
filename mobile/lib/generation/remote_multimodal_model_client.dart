@@ -178,7 +178,7 @@ class RemoteMultimodalModelClient implements ModelClient {
   }
 
   @override
-  Future<UIPage?> generateUI({
+  Future<UIGenerationResult?> generateUI({
     required List<VideoFrame> frames,
     required List<({double x, double y})> markedPositions,
     required String goal,
@@ -218,9 +218,10 @@ class RemoteMultimodalModelClient implements ModelClient {
       }
 
       final payload = jsonDecode(body) as Map<String, Object?>;
-      final pageJson = (payload['page'] as Map?)?.cast<String, Object?>();
-      if (pageJson == null) return null;
-      return UIPage.fromJson(pageJson);
+      final html = payload['html'] as String?;
+      final title = payload['title'] as String? ?? '操作练习';
+      if (html == null || html.isEmpty) return null;
+      return UIGenerationResult(html: html, title: title);
     } finally {
       client.close(force: true);
     }

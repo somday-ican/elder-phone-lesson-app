@@ -22,7 +22,7 @@ abstract class ModelClient {
     required String goal,
   });
 
-  Future<UIPage?> generateUI({
+  Future<UIGenerationResult?> generateUI({
     required List<VideoFrame> frames,
     required List<({double x, double y})> markedPositions,
     required String goal,

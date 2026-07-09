@@ -168,44 +168,70 @@ class MockLessonGenerator implements ModelClient {
   }
 
   @override
-  Future<UIPage?> generateUI({
+  Future<UIGenerationResult?> generateUI({
     required List<VideoFrame> frames,
     required List<({double x, double y})> markedPositions,
     required String goal,
   }) async {
-    return UIPage(
-      title: '操作练习',
-      backgroundColor: '#F2F2F7',
-      appBar: const UIAppBar(
-        title: '操作练习',
-        showBackButton: false,
-      ),
-      body: UIWidget(
-        type: 'column',
-        children: [
-          const UIWidget(
-            type: 'text',
-            content: '请依次点击下面的按钮，完成操作',
-            fontSize: 16,
-            fontWeight: 'bold',
-            color: '#333333',
-          ),
-          const UIWidget(type: 'divider'),
-          ...markedPositions.asMap().entries.map((e) => UIWidget(
-                type: 'button',
-                label: '步骤 ${e.key + 1}',
-                backgroundColor: '#007AFF',
-                textColor: '#FFFFFF',
-                borderRadius: 12,
-                fontSize: 17,
-                fontWeight: 'bold',
-                isTarget: true,
-                stepIndex: e.key + 1,
-                instruction: '请点击「步骤 ${e.key + 1}」按钮',
-              )),
-        ],
-      ),
-    );
+    final buttons = StringBuffer();
+    for (var i = 0; i < markedPositions.length; i++) {
+      buttons.writeln('''
+        <button class="target-btn" onclick="onTargetClick(${i + 1})"
+                style="background:#007AFF;color:#fff;border:none;padding:15px 30px;
+                       border-radius:12px;font-size:17px;font-weight:600;margin:8px 0;
+                       cursor:pointer;width:100%;max-width:280px;animation:pulse 1.5s infinite;">
+          📱 步骤 ${i + 1}
+        </button>''');
+    }
+
+    final html = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     background:#e5e5e5;display:flex;justify-content:center;align-items:center;
+     min-height:100vh;padding:16px;}
+.phone{width:375px;background:#F2F2F7;border-radius:36px;overflow:hidden;
+       box-shadow:0 20px 60px rgba(0,0,0,0.3),0 0 0 2px #1a1a1a;min-height:680px;}
+.status-bar{height:44px;background:#fff;display:flex;align-items:center;
+            justify-content:space-between;padding:0 24px;font-size:13px;font-weight:600;color:#1c1c1e;}
+.nav-bar{height:52px;background:#fff;display:flex;align-items:center;justify-content:center;
+         padding:0 16px;border-bottom:1px solid #e5e5ea;font-size:18px;font-weight:700;color:#1c1c1e;}
+.content{padding:28px 20px;display:flex;flex-direction:column;align-items:center;}
+.title{font-size:23px;font-weight:800;color:#1c1c1e;margin-bottom:6px;text-align:center;}
+.subtitle{font-size:15px;color:#8e8e93;margin-bottom:20px;text-align:center;line-height:1.5;}
+@keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(0,122,255,0.4);}
+                  50%{transform:scale(1.04);box-shadow:0 0 0 14px rgba(0,122,255,0);}}
+.target-btn{transition:transform 0.15s ease;box-shadow:0 4px 14px rgba(0,0,0,0.12);}
+.target-btn:active{transform:scale(0.94)!important;}
+.step-info{color:#8e8e93;font-size:13px;margin-top:24px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="status-bar"><span>9:41</span><span>📶 🔋</span></div>
+  <div class="nav-bar">操作练习</div>
+  <div class="content">
+    <div class="title">📚 操作练习</div>
+    <div class="subtitle">请按照步骤顺序<br>依次点击下面的按钮</div>
+    ${buttons.toString()}
+    <div class="step-info">共 ${markedPositions.length} 个步骤</div>
+  </div>
+</div>
+<script>
+function onTargetClick(step) {
+  if (window.TargetBridge) {
+    window.TargetBridge.postMessage(JSON.stringify({event:"target_click",stepIndex:step}));
+  }
+}
+</script>
+</body>
+</html>''';
+
+    return UIGenerationResult(html: html, title: '操作练习');
   }
 
   @override

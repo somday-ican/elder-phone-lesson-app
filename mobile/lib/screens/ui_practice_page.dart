@@ -1,16 +1,18 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
-import '../models/ui_description.dart';
-import '../widgets/ui_builder.dart';
+import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 class UIPracticePage extends StatefulWidget {
   const UIPracticePage({
     super.key,
-    required this.page,
+    required this.html,
+    required this.title,
     required this.targetCount,
   });
 
-  final UIPage page;
+  final String html;
+  final String title;
   final int targetCount;
 
   @override
@@ -18,26 +20,68 @@ class UIPracticePage extends StatefulWidget {
 }
 
 class _UIPracticePageState extends State<UIPracticePage> {
+  late WebViewController _controller;
   int _currentStep = 1;
   int _correctCount = 0;
   int _wrongCount = 0;
   String? _feedbackText;
   Color? _feedbackColor;
+  bool _pageLoaded = false;
 
-  void _handleTargetTap(UIWidget target) {
-    final expectedStep = target.stepIndex ?? _currentStep;
+  @override
+  void initState() {
+    super.initState();
 
-    if (expectedStep == _currentStep) {
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            setState(() => _pageLoaded = true);
+          },
+        ),
+      )
+      ..addJavaScriptChannel(
+        'TargetBridge',
+        onMessageReceived: _handleJsMessage,
+      )
+      ..loadHtmlString(_wrapHtml(widget.html));
+  }
+
+  String _wrapHtml(String original) {
+    // Add a subtle overlay styling that enhances the AI-generated HTML
+    // but doesn't override its content
+    return original.replaceFirst(
+      '</head>',
+      '<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"></head>',
+    );
+  }
+
+  void _handleJsMessage(JavaScriptMessage message) {
+    try {
+      final data = jsonDecode(message.message) as Map<String, dynamic>;
+      final event = data['event'] as String?;
+
+      switch (event) {
+        case 'target_click':
+          final step = (data['stepIndex'] as num?)?.toInt() ?? 0;
+          _onTargetClick(step);
+        case 'wrong_click':
+          _onWrongClick();
+      }
+    } catch (_) {}
+  }
+
+  void _onTargetClick(int step) {
+    if (step == _currentStep) {
       setState(() {
         _correctCount++;
-        _feedbackText = '✓ 正确！${target.instruction ?? "很好！"}';
+        _feedbackText = '✓ 正确！';
         _feedbackColor = Colors.green;
       });
 
       if (_currentStep >= widget.targetCount) {
-        Future.delayed(const Duration(milliseconds: 1000), () {
-          if (mounted) _showCompletionDialog();
-        });
+        Future.delayed(const Duration(seconds: 1), _showCompletion);
       } else {
         Future.delayed(const Duration(milliseconds: 800), () {
           if (mounted) {
@@ -50,23 +94,28 @@ class _UIPracticePageState extends State<UIPracticePage> {
         });
       }
     } else {
-      setState(() {
-        _wrongCount++;
-        _feedbackText = '✗ 不对哦，请按顺序点击';
-        _feedbackColor = Colors.red;
-      });
-      Future.delayed(const Duration(milliseconds: 1200), () {
-        if (mounted) {
-          setState(() {
-            _feedbackText = null;
-            _feedbackColor = null;
-          });
-        }
-      });
+      _onWrongClick();
     }
   }
 
-  void _showCompletionDialog() {
+  void _onWrongClick() {
+    setState(() {
+      _wrongCount++;
+      _feedbackText = '✗ 顺序不对，请按步骤来';
+      _feedbackColor = Colors.red;
+    });
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        setState(() {
+          _feedbackText = null;
+          _feedbackColor = null;
+        });
+      }
+    });
+  }
+
+  void _showCompletion() {
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -88,15 +137,18 @@ class _UIPracticePageState extends State<UIPracticePage> {
             Text(
               _wrongCount == 0
                   ? '太棒了！全部点对了！🎉'
-                  : '继续加油，多练几次就熟了 💪',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                  : '继续加油！💪',
+              style: const TextStyle(fontSize: 16),
             ),
           ],
         ),
         actions: [
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('好的'),
+            onPressed: () {
+              Navigator.of(ctx).pop(); // close dialog
+              Navigator.of(context).pop(); // go back
+            },
+            child: const Text('完成'),
           ),
         ],
       ),
@@ -105,38 +157,28 @@ class _UIPracticePageState extends State<UIPracticePage> {
 
   @override
   Widget build(BuildContext context) {
-    final appBar = widget.page.appBar;
-    final bgColor = UIBuilder.parseColor(widget.page.backgroundColor);
-
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.black,
         surfaceTintColor: Colors.transparent,
         title: Text(
-          appBar?.title ?? widget.page.title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+          widget.title,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
-        leading: appBar?.showBackButton == true
-            ? const Icon(Icons.arrow_back_ios_new, size: 20)
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white70),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 14),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _MiniChip(
-                  icon: Icons.check,
-                  value: _correctCount,
-                  color: Colors.green,
-                ),
+                _MiniChip(icon: Icons.check, value: _correctCount, color: Colors.green),
                 const SizedBox(width: 6),
-                _MiniChip(
-                  icon: Icons.close,
-                  value: _wrongCount,
-                  color: Colors.red,
-                ),
+                _MiniChip(icon: Icons.close, value: _wrongCount, color: Colors.red),
               ],
             ),
           ),
@@ -144,9 +186,9 @@ class _UIPracticePageState extends State<UIPracticePage> {
       ),
       body: Column(
         children: [
-          // Step progress
+          // Progress bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
             child: Row(
               children: [
                 for (var i = 1; i <= widget.targetCount; i++)
@@ -161,7 +203,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
                             ? Colors.green
                             : i == _currentStep
                                 ? const Color(0xFF007AFF)
-                                : Colors.grey.withValues(alpha: 0.2),
+                                : Colors.white.withValues(alpha: 0.2),
                       ),
                     ),
                   ),
@@ -173,44 +215,51 @@ class _UIPracticePageState extends State<UIPracticePage> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
             child: Text(
               '第 $_currentStep 步 / 共 ${widget.targetCount} 步',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
             ),
           ),
-          // Reconstructed UI
-          Expanded(
-            child: SingleChildScrollView(
-              child: UIBuilder(
-                widget: widget.page.body,
-                interactive: true,
-                currentStepIndex: _currentStep,
-                onTargetTap: _handleTargetTap,
+          // Loading spinner while page loads
+          if (!_pageLoaded)
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(color: Colors.white),
               ),
+            ),
+          // WebView
+          Expanded(
+            child: Opacity(
+              opacity: _pageLoaded ? 1.0 : 0.0,
+              child: WebViewWidget(controller: _controller),
             ),
           ),
           // Feedback bar
-          if (_feedbackText != null)
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              decoration: BoxDecoration(
-                color: (_feedbackColor ?? Colors.grey).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(
-                _feedbackText!,
-                style: TextStyle(
-                  color: _feedbackColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            child: _feedbackText != null
+                ? Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: (_feedbackColor ?? Colors.grey)
+                          .withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      _feedbackText!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _feedbackColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                : const SizedBox(height: 8),
+          ),
         ],
       ),
     );
@@ -223,7 +272,6 @@ class _MiniChip extends StatelessWidget {
     required this.value,
     required this.color,
   });
-
   final IconData icon;
   final int value;
   final MaterialColor color;
@@ -233,7 +281,7 @@ class _MiniChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
@@ -241,14 +289,9 @@ class _MiniChip extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 14),
           const SizedBox(width: 3),
-          Text(
-            '$value',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-            ),
-          ),
+          Text('$value',
+              style: TextStyle(
+                  color: color, fontWeight: FontWeight.w700, fontSize: 13)),
         ],
       ),
     );
@@ -261,7 +304,6 @@ class _ScoreRow extends StatelessWidget {
     required this.value,
     required this.color,
   });
-
   final String label;
   final int value;
   final MaterialColor color;
@@ -272,14 +314,9 @@ class _ScoreRow extends StatelessWidget {
       children: [
         Text(label, style: const TextStyle(fontSize: 16)),
         const Spacer(),
-        Text(
-          '$value 次',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: color,
-          ),
-        ),
+        Text('$value 次',
+            style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w700, color: color)),
       ],
     );
   }
