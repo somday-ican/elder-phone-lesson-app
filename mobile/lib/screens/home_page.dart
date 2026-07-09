@@ -428,6 +428,7 @@ class _HomePageState extends State<HomePage>
                 : _buildCardGrid(),
           ),
           _buildInputBar(),
+          const _BottomNavBar(currentIndex: 0),
         ],
       ),
     );
@@ -850,6 +851,48 @@ class _HomePageState extends State<HomePage>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BottomNavBar extends StatelessWidget {
+  const _BottomNavBar({required this.currentIndex});
+  final int currentIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, -2))]),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+      height: 56 + MediaQuery.of(context).padding.bottom,
+      child: Row(children: [
+        _NavItem(icon: Icons.home_rounded, label: '首页', active: currentIndex == 0, onTap: () {}),
+        _NavItem(icon: Icons.emoji_events_rounded, label: '成就', active: false, onTap: () {
+          Navigator.of(context).pushNamed('/achievements');
+        }),
+      ]),
+    );
+  }
+}
+
+class _NavItem extends StatelessWidget {
+  const _NavItem({required this.icon, required this.label, required this.active, required this.onTap});
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 28, color: active ? const Color(0xFFFF6B35) : Colors.grey),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: active ? const Color(0xFFFF6B35) : Colors.grey)),
+        ]),
       ),
     );
   }

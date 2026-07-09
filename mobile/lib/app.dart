@@ -11,6 +11,7 @@ import 'generation/prompt_builder.dart';
 import 'generation/remote_multimodal_model_client.dart';
 import 'models/lesson.dart';
 import 'models/video_frame.dart';
+import 'screens/achievement_page.dart';
 import 'screens/home_page.dart';
 import 'screens/ui_practice_page.dart';
 import 'widgets/frame_stage.dart';
@@ -26,17 +27,18 @@ class VideoToLessonApp extends StatelessWidget {
       title: '长辈学手机',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF007AFF),
+          seedColor: const Color(0xFFFF6B35),
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFF2F2F7),
+        scaffoldBackgroundColor: const Color(0xFFF9F8F6),
         useMaterial3: true,
+        fontFamily: 'Inter',
       ),
       initialRoute: '/',
       routes: {
         '/': (_) => HomePage(modelClient: modelClient),
-        '/screenshot': (_) =>
-            ScreenshotLessonPage(modelClient: modelClient),
+        '/screenshot': (_) => ScreenshotLessonPage(modelClient: modelClient),
+        '/achievements': (_) => const AchievementPage(),
       },
     );
   }

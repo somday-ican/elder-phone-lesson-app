@@ -253,18 +253,13 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFFF9F8F6),
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: const Color(0xFFF9F8F6),
         surfaceTintColor: Colors.transparent,
-        title: Text(
-          widget.title,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white70),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        elevation: 0,
+        title: Text(widget.title, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w800, fontSize: 22)),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 22), onPressed: () => Navigator.of(context).pop()),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 14),
