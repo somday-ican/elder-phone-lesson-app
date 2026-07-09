@@ -43,5 +43,6 @@ abstract class ModelClient {
   Future<ChatGenerationResult> chatGenerate({
     required String goal,
     int stepCount = 5,
+    List<String>? screenshotBase64s,
   });
 }

@@ -277,6 +277,7 @@ class RemoteMultimodalModelClient implements ModelClient {
   Future<ChatGenerationResult> chatGenerate({
     required String goal,
     int stepCount = 5,
+    List<String>? screenshotBase64s,
   }) async {
     final url = Uri.parse('${endpoint.origin}/api/chat-generate');
     final client = HttpClient()..connectionTimeout = timeout;
@@ -290,6 +291,8 @@ class RemoteMultimodalModelClient implements ModelClient {
         jsonEncode({
           'goal': goal,
           'stepCount': stepCount,
+          if (screenshotBase64s != null && screenshotBase64s.isNotEmpty)
+            'screenshots': screenshotBase64s,
         }),
       );
 

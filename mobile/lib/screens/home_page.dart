@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../data/card_repository.dart';
@@ -139,6 +143,92 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  Future<void> _screenshotToCard() async {
+    // Pick images first
+    final picker = ImagePicker();
+    final files = await picker.pickMultiImage(imageQuality: 80);
+    if (files.isEmpty) return;
+
+    // Ask for goal
+    final goalCtrl = TextEditingController();
+    final goal = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('这些截图是做什么的？'),
+        content: TextField(
+          controller: goalCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '比如：我要给孙子打微信视频',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, goalCtrl.text.trim()), child: const Text('生成')),
+        ],
+      ),
+    );
+    goalCtrl.dispose();
+    if (!mounted) return;
+    if (goal == null || goal.isEmpty) return;
+    final goalText = goal; // narrow to non-null
+
+    // Compress images to base64
+    setState(() { _isGenerating = true; _generatingElapsed = 0; });
+    _progressCtrl.forward(from: 0);
+    _generatingTimer?.cancel();
+    _generatingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _generatingElapsed++);
+    });
+
+    try {
+      final base64s = <String>[];
+      for (final f in files) {
+        final bytes = await File(f.path).readAsBytes();
+        // Compress: resize to max 540px wide, JPEG quality 60
+        final decoded = img.decodeImage(bytes);
+        if (decoded != null) {
+          const maxW = 540;
+          final resized = decoded.width > maxW
+              ? img.copyResize(decoded, width: maxW,
+                  height: (decoded.height * maxW / decoded.width).round())
+              : decoded;
+          final compressed = img.encodeJpg(resized, quality: 60);
+          base64s.add('data:image/jpeg;base64,${base64Encode(compressed)}');
+        } else {
+          base64s.add('data:image/jpeg;base64,${base64Encode(bytes)}');
+        }
+      }
+
+      final result = await widget.modelClient.chatGenerate(
+        goal: goalText,
+        screenshotBase64s: base64s,
+      );
+      _generatingTimer?.cancel();
+      if (!mounted) return;
+
+      final card = SkillCard.create(
+        title: result.title,
+        html: result.html,
+        stepCount: result.steps.length,
+      );
+      await widget.cardRepository.add(card);
+      await _loadCards();
+      _progressCtrl.stop();
+      setState(() => _isGenerating = false);
+      _openCard(card);
+    } catch (error) {
+      _generatingTimer?.cancel();
+      _progressCtrl.stop();
+      if (mounted) {
+        setState(() => _isGenerating = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('生成失败：$error'), backgroundColor: Colors.red.shade700),
+        );
+      }
+    }
+  }
+
   Future<void> _toggleVoice() async {
     // If already listening, stop and submit
     if (_isListening) {
@@ -265,8 +355,13 @@ class _HomePageState extends State<HomePage>
         backgroundColor: const Color(0xFFF2F2F7),
         actions: [
           IconButton(
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            tooltip: '从截图生成卡片',
+            onPressed: _isGenerating ? null : () => _screenshotToCard(),
+          ),
+          IconButton(
             icon: const Icon(Icons.photo_library_outlined),
-            tooltip: '截图教程',
+            tooltip: '旧版截图教程',
             onPressed: () => Navigator.of(context).pushNamed('/screenshot'),
           ),
         ],

@@ -238,6 +238,7 @@ function onTargetClick(step) {
   Future<ChatGenerationResult> chatGenerate({
     required String goal,
     int stepCount = 5,
+    List<String>? screenshotBase64s,
   }) async {
     final steps = <({int stepIndex, String instruction, String elderTip})>[];
     final buttons = StringBuffer();

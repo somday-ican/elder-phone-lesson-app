@@ -21,6 +21,7 @@ export async function chatGenerateController(req, res, config) {
   }
 
   const { goal, stepCount } = validation.value;
+  const customScreenshots = validateScreenshots(body.screenshots);
 
   // Mock mode — return static result
   if (config.lessonGeneratorMode === "mock") {
@@ -35,7 +36,7 @@ export async function chatGenerateController(req, res, config) {
 
   // Remote LLM call — no images, just text prompt
   try {
-    const prompt = buildChatGeneratePrompt({ goal, stepCount });
+    const prompt = buildChatGeneratePrompt({ goal, stepCount, customScreenshots });
 
     const response = await fetch(`${config.aiBaseUrl}/chat/completions`, {
       method: "POST",
@@ -81,6 +82,13 @@ export async function chatGenerateController(req, res, config) {
       details: process.env.NODE_ENV !== "production" ? error.message : undefined
     });
   }
+}
+
+function validateScreenshots(screenshots) {
+  if (!Array.isArray(screenshots)) return [];
+  return screenshots.filter(s =>
+    typeof s === "string" && s.match(/^data:image\/(png|jpeg|jpg|webp);base64,/)
+  ).slice(0, 6);
 }
 
 function validateRequest(body) {
