@@ -231,9 +231,16 @@ class _HomePageState extends State<HomePage>
     setState(() => _isListening = true);
     try {
       final filePath = '${Directory.systemTemp.path}/voice_input.m4a';
-      // WAV has broadest Android device support. aacLc is often unavailable on Chinese phones.
+
+      // Check if aacLc is supported, fall back gracefully
+      final aacOk = await _recorder.isEncoderSupported(AudioEncoder.aacLc);
       await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1, bitRate: 64000),
+        RecordConfig(
+          encoder: aacOk ? AudioEncoder.aacLc : AudioEncoder.aacHe,
+          sampleRate: 16000,
+          numChannels: 1,
+          bitRate: aacOk ? 64000 : 32000,
+        ),
         path: filePath,
       );
 
