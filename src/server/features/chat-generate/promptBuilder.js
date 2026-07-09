@@ -13,9 +13,32 @@ function getAllReferenceImages() {
   _refCache = [];
   try {
     for (const f of readdirSync(REF_DIR).filter(x => x.endsWith('.txt')))
-      try { const b64 = readFileSync(join(REF_DIR, f), "utf8").trim(); if (b64) _refCache.push({ name: f.replace('.txt',''), b64 }); } catch (_) {}
+      try {
+        const b64 = readFileSync(join(REF_DIR, f), "utf8").trim();
+        if (b64) {
+          _refCache.push({
+            name: f.replace('.txt',''),
+            app: f.split('-')[0],
+            b64
+          });
+        }
+      } catch (_) {}
   } catch (_) {}
   return _refCache;
+}
+
+function getReferenceImagesForApp(app) {
+  const refs = getAllReferenceImages();
+  const matched = refs.filter(ref => ref.app === app);
+  return matched.length > 0 ? matched : refs.filter(ref => ref.app === "default");
+}
+
+function describeReference(ref) {
+  const labels = {
+    "wechat-chat-list": "WeChat chat list reference: top nav, search row, conversation cells, 44-48px avatars, timestamps, unread badges, thin dividers, bottom tab bar.",
+    "wechat-discover": "WeChat Discover reference: white grouped list rows, green icons, compact spacing, thin dividers, bottom tab bar."
+  };
+  return labels[ref.name] || `${ref.name} visual reference: match spacing, typography, colors, tab bar and real app density.`;
 }
 
 // ── App design reference (compact) ──────────────────────────────
@@ -48,7 +71,7 @@ function detectApp(goal) {
 export function buildChatGeneratePrompt({ goal, stepCount, customScreenshots }) {
   const app = detectApp(goal);
   const colors = APP_COLORS[app] || APP_COLORS.default;
-  const refs = getAllReferenceImages();
+  const refs = getReferenceImagesForApp(app);
   const hasCustomScreenshots = Array.isArray(customScreenshots) && customScreenshots.length > 0;
   const hasRefs = refs.length > 0;
 
@@ -56,19 +79,21 @@ export function buildChatGeneratePrompt({ goal, stepCount, customScreenshots }) 
   // Built-in references are supplementary (and labeled as such).
   const primaryRefMsg = hasCustomScreenshots
     ? "USER SCREENSHOTS PROVIDED BELOW. REPLICATE their EXACT visual style — colors, layout, spacing, typography, EVERYTHING."
-    : (hasRefs ? "Built-in reference screenshots below. Match their style if they match the target app." : "");
+    : (hasRefs ? `Built-in ${app} reference screenshots below. Use them as visual style references.` : "");
 
   const system = [
     "You are a master mobile UI developer. Create interactive HTML simulations of real apps for elderly Chinese users.",
     "Return ONLY valid JSON: {\"html\":\"<!DOCTYPE html>...\",\"title\":\"...\",\"steps\":[...]}. No markdown fences.",
     `Target app style: ${colors}`,
     `Steps: ${stepCount} screens (one .page div each, only page 1 visible; JS switches pages on click).`,
-    hasCustomScreenshots ? "CRITICAL: User provided screenshots of the REAL app. Study them. Replicate the EXACT layout, colors, spacing, font sizes, card styles, EVERY detail." : ""
+    hasCustomScreenshots ? "CRITICAL: User provided screenshots of the REAL app. Study them. Replicate the EXACT layout, colors, spacing, font sizes, card styles, EVERY detail." : "",
+    hasRefs ? "Use reference images to match real app density, typography, navigation bars, tab bars, icons, dividers, avatar sizes and spacing. Do not create generic blue iOS mockups when a target app reference exists." : ""
   ].join(" ");
 
   const user = [
     `Build a ${stepCount}-page tutorial teaching an elderly person: "${goal}"`,
     `App style: ${colors}`,
+    primaryRefMsg,
     "",
     "=== STRUCTURE ===",
     ".phone{375px,36px radius,nice shadow,centered on #E5E5E5}",
@@ -81,6 +106,7 @@ export function buildChatGeneratePrompt({ goal, stepCount, customScreenshots }) 
     "Target IS a real app element — tab,list item,button,menu entry. NOT a tutorial label.",
     "Use real Chinese names, real message text, real timestamps (上午9:20,昨天,6月15日).",
     "Add red badges (#FA5151) and notification dots.",
+    app === "wechat" ? "For WeChat: use #07C160 only for active tab/highlights; nav is light #EDEDED or white; list rows are 64-72px; avatars about 44-48px; bottom tabs are 微信/通讯录/发现/我; avoid fake gradient cards." : "",
     "",
     "=== JS (include exactly) ===",
     "<script>var p=0;function onTargetClick(n){if(window.TargetBridge)window.TargetBridge.postMessage(JSON.stringify({event:'target_click',stepIndex:n||(p+1)}));document.getElementById('page'+(p+1)).style.display='none';p++;if(p>="+stepCount+"){document.getElementById('completion').style.display='flex'}else{document.getElementById('page'+(p+1)).style.display='flex'}}</script>",
@@ -102,8 +128,9 @@ export function buildChatGeneratePrompt({ goal, stepCount, customScreenshots }) 
   }
   // Built-in references = supplementary (only if no custom screenshots, or as side help)
   else if (hasRefs) {
-    userContent.push({ type: "text", text: "=== REFERENCE SCREENSHOTS (match style if target app matches) ===" });
+    userContent.push({ type: "text", text: `=== BUILT-IN ${app.toUpperCase()} REFERENCE SCREENSHOTS ===\nStudy these images for visual style. Recreate similar UI patterns in HTML; do not mention the references to the user.` });
     for (const ref of refs) {
+      userContent.push({ type: "text", text: describeReference(ref) });
       userContent.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${ref.b64}` } });
     }
   }
