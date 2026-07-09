@@ -139,8 +139,18 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _startListening() async {
-    // Try to init if not already
+  Future<void> _toggleVoice() async {
+    // If already listening, stop and submit
+    if (_isListening) {
+      await _speech.stop();
+      setState(() => _isListening = false);
+      if (_textController.text.trim().isNotEmpty) {
+        _generate();
+      }
+      return;
+    }
+
+    // Not yet listening — start
     if (!_speechInitialized) {
       await _initSpeech();
     }
@@ -148,7 +158,7 @@ class _HomePageState extends State<HomePage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('语音功能未就绪，请在设置中允许麦克风权限'),
+            content: Text('语音功能未就绪，请检查麦克风权限'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -156,56 +166,35 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // Stop any ongoing session first
-    if (_isListening) {
-      await _speech.stop();
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
+    // Mark as listening immediately (before async listen call)
+    // so the UI reflects the intent instantly
+    setState(() => _isListening = true);
 
     try {
       await _speech.listen(
         onResult: (result) {
           if (!mounted) return;
-          setState(() {
-            _textController.text = result.recognizedWords;
-          });
+          _textController.text = result.recognizedWords;
           if (result.finalResult) {
             setState(() => _isListening = false);
-            // Auto-submit after voice input completes
-            if (_textController.text.trim().isNotEmpty) {
-              _generate();
-            }
           }
         },
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
         // ignore: deprecated_member_use
         localeId: 'zh_CN',
-        cancelOnError: false,
         partialResults: true,
       );
-      if (mounted) setState(() => _isListening = true);
     } catch (_) {
-      // Fallback without locale
       try {
         await _speech.listen(
           onResult: (result) {
             if (!mounted) return;
-            setState(() {
-              _textController.text = result.recognizedWords;
-            });
+            _textController.text = result.recognizedWords;
             if (result.finalResult) {
               setState(() => _isListening = false);
-              if (_textController.text.trim().isNotEmpty) {
-                _generate();
-              }
             }
           },
-          listenFor: const Duration(seconds: 30),
-          pauseFor: const Duration(seconds: 3),
           partialResults: true,
         );
-        if (mounted) setState(() => _isListening = true);
       } catch (_) {
         if (mounted) setState(() => _isListening = false);
       }
@@ -664,16 +653,16 @@ class _HomePageState extends State<HomePage>
               child: TextField(
                 controller: _textController,
                 focusNode: _focusNode,
-                enabled: !_isGenerating && !_isListening,
+                enabled: !_isGenerating,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _generate(),
                 style: const TextStyle(fontSize: 16),
                 decoration: InputDecoration(
                   hintText: _isListening
-                      ? '正在聆听...'
+                      ? '正在聆听，再次点击麦克风结束...'
                       : _isGenerating
                           ? '正在生成中...'
-                          : '打字或按住麦克风说话...',
+                          : '打字或点击麦克风说话...',
                   hintStyle: TextStyle(
                     color: _isListening
                         ? const Color(0xFF007AFF)
@@ -697,52 +686,20 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           const SizedBox(width: 10),
-          // Voice button — long press to talk
-          Material(
-            color: Colors.transparent,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapDown: _isGenerating
-                  ? null
-                  : (_) => _startListening(),
-              onTapUp: _isGenerating
-                  ? null
-                  : (_) {
-                      if (_isListening) {
-                        _speech.stop();
-                        setState(() => _isListening = false);
-                        // If text was captured, auto-submit
-                        if (_textController.text.trim().isNotEmpty) {
-                          _generate();
-                        }
-                      }
-                    },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: _isListening
-                      ? Colors.red
-                      : _speechInitialized
-                          ? const Color(0xFF007AFF)
-                          : Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(26),
-                  boxShadow: _isListening
-                      ? [
-                          BoxShadow(
-                            color: Colors.red.withValues(alpha: 0.4),
-                            blurRadius: 20,
-                            spreadRadius: 3,
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Icon(
-                  _isListening ? Icons.mic : Icons.mic_none,
-                  color: Colors.white,
-                  size: 24,
-                ),
+          // Voice button — tap to start, tap again to stop
+          IconButton(
+            onPressed: _isGenerating ? null : _toggleVoice,
+            icon: const Icon(Icons.mic, size: 24),
+            style: IconButton.styleFrom(
+              backgroundColor: _isListening
+                  ? Colors.red
+                  : _speechInitialized
+                      ? const Color(0xFF007AFF)
+                      : Colors.grey.shade300,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.all(14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(26),
               ),
             ),
           ),
