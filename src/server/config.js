@@ -51,6 +51,7 @@ export function getConfig(env = process.env) {
     lessonGeneratorMode: env.LESSON_GENERATOR_MODE || DEFAULTS.LESSON_GENERATOR_MODE,
     aiBaseUrl: env.AI_BASE_URL || env.OMINIGATE_BASE_URL || DEFAULTS.AI_BASE_URL,
     aiModelName: env.AI_MODEL_NAME || DEFAULTS.AI_MODEL_NAME,
+    aiUiModelName: env.AI_UI_MODEL_NAME || env.AI_MODEL_NAME || DEFAULTS.AI_MODEL_NAME,
     aiApiKey: env.AI_API_KEY || env.OMINIGATE_API_KEY || DEFAULTS.AI_API_KEY
   };
 }

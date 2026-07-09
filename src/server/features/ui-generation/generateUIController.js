@@ -50,7 +50,7 @@ export async function generateUIController(req, res, config) {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        model: config.aiModelName,
+        model: config.aiUiModelName,
         temperature: 0.3,
         response_format: { type: "json_object" },
         messages: [

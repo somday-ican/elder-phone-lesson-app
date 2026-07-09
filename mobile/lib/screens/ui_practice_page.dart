@@ -49,12 +49,34 @@ class _UIPracticePageState extends State<UIPracticePage> {
   }
 
   String _wrapHtml(String original) {
-    // Add a subtle overlay styling that enhances the AI-generated HTML
-    // but doesn't override its content
-    return original.replaceFirst(
-      '</head>',
-      '<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"></head>',
-    );
+    // Inject global click detection: any click NOT on a target button = wrong
+    final wrongClickScript = '''
+<script>
+(function(){
+  document.addEventListener('click', function(e){
+    // Check if click was on a target button
+    var el = e.target;
+    while (el) {
+      if (el.onclick && el.onclick.toString().indexOf('onTargetClick') !== -1) {
+        return; // Target button — let it handle
+      }
+      el = el.parentElement;
+    }
+    // Not a target button — report wrong click
+    if (window.TargetBridge) {
+      window.TargetBridge.postMessage(JSON.stringify({event: "wrong_click"}));
+    }
+  });
+})();
+</script>
+</body>''';
+
+    return original
+        .replaceFirst(
+          '</head>',
+          '<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"></head>',
+        )
+        .replaceFirst('</body>', wrongClickScript);
   }
 
   void _handleJsMessage(JavaScriptMessage message) {
@@ -101,7 +123,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
   void _onWrongClick() {
     setState(() {
       _wrongCount++;
-      _feedbackText = '✗ 顺序不对，请按步骤来';
+      _feedbackText = '✗ 点错了，请找到正确的按钮再试一次';
       _feedbackColor = Colors.red;
     });
     Future.delayed(const Duration(milliseconds: 1500), () {
