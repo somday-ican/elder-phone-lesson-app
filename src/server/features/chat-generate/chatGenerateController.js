@@ -2,7 +2,7 @@ import { readJsonBody } from "../../http/readJsonBody.js";
 import { sendJson } from "../../http/sendJson.js";
 import { buildChatGeneratePrompt } from "./promptBuilder.js";
 
-const MAX_REQUEST_BYTES = 50000;
+const MAX_REQUEST_BYTES = 500000; // increased for screenshot base64 payloads
 const MAX_GOAL_LENGTH = 200;
 const MAX_STEP_COUNT = 8;
 const MIN_STEP_COUNT = 3;

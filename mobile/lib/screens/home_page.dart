@@ -256,11 +256,11 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // Mark as listening immediately (before async listen call)
-    // so the UI reflects the intent instantly
+    // Show listening UI immediately for responsiveness
     setState(() => _isListening = true);
 
     try {
+      // Try system default locale first (more compatible across Chinese phones)
       await _speech.listen(
         onResult: (result) {
           if (!mounted) return;
@@ -269,11 +269,23 @@ class _HomePageState extends State<HomePage>
             setState(() => _isListening = false);
           }
         },
-        // ignore: deprecated_member_use
-        localeId: 'zh_CN',
         partialResults: true,
       );
+      // listen() returned without exception — check if platform actually started
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted && !_speech.isListening) {
+        // Platform accepted but didn't start — speech unavailable
+        setState(() => _isListening = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('语音识别不可用，请用文字输入'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (_) {
+      // Try Chinese locale fallback
       try {
         await _speech.listen(
           onResult: (result) {
@@ -283,10 +295,24 @@ class _HomePageState extends State<HomePage>
               setState(() => _isListening = false);
             }
           },
+          // ignore: deprecated_member_use
+          localeId: 'zh_CN',
           partialResults: true,
         );
-      } catch (_) {
-        if (mounted) setState(() => _isListening = false);
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted && !_speech.isListening) {
+          setState(() => _isListening = false);
+        }
+      } catch (err) {
+        if (mounted) {
+          setState(() => _isListening = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('语音识别未就绪，请用文字输入'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     }
   }
