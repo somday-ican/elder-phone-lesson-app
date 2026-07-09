@@ -280,9 +280,11 @@ class RemoteMultimodalModelClient implements ModelClient {
   }) async {
     final url = Uri.parse('${endpoint.origin}/api/chat-generate');
     final client = HttpClient()..connectionTimeout = timeout;
+    // Chat generation needs more time (GPT-5.5 can take 60-90s)
+    final chatTimeout = timeout * 3;
 
     try {
-      final request = await client.postUrl(url).timeout(timeout);
+      final request = await client.postUrl(url).timeout(chatTimeout);
       request.headers.contentType = ContentType.json;
       request.write(
         jsonEncode({
@@ -291,8 +293,8 @@ class RemoteMultimodalModelClient implements ModelClient {
         }),
       );
 
-      final response = await request.close().timeout(timeout);
-      final body = await utf8.decoder.bind(response).join().timeout(timeout);
+      final response = await request.close().timeout(chatTimeout);
+      final body = await utf8.decoder.bind(response).join().timeout(chatTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw HttpException(
           'Chat generate API returned ${response.statusCode}: $body',
