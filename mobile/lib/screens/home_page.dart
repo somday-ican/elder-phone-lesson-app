@@ -33,7 +33,6 @@ class _HomePageState extends State<HomePage>
   final AudioRecorder _recorder = AudioRecorder();
   bool _isListening = false;
   bool _isGenerating = false;
-  List<SkillCard> _cards = [];
   int _generatingElapsed = 0;
   Timer? _generatingTimer;
 
@@ -54,12 +53,6 @@ class _HomePageState extends State<HomePage>
       TweenSequenceItem(tween: Tween(begin: 0.45, end: 0.75), weight: 3),
       TweenSequenceItem(tween: Tween(begin: 0.75, end: 0.90), weight: 4),
     ]).animate(_progressCtrl);
-    _loadCards();
-  }
-
-  Future<void> _loadCards() async {
-    final cards = await widget.cardRepository.loadAll();
-    if (mounted) setState(() => _cards = cards);
   }
 
   Future<void> _generate() async {
@@ -94,7 +87,6 @@ class _HomePageState extends State<HomePage>
       );
 
       await widget.cardRepository.add(card);
-      await _loadCards();
       _textController.clear();
 
       // Complete the progress bar
@@ -110,7 +102,9 @@ class _HomePageState extends State<HomePage>
         setState(() => _isGenerating = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('生成失败：${error.toString().replaceFirst("Exception: ", "")}'),
+            content: Text(
+              '生成失败：${error.toString().replaceFirst("Exception: ", "")}',
+            ),
             behavior: SnackBarBehavior.floating,
             backgroundColor: Colors.red.shade700,
             duration: const Duration(seconds: 4),
@@ -126,6 +120,7 @@ class _HomePageState extends State<HomePage>
     final picker = ImagePicker();
     final files = await picker.pickMultiImage(imageQuality: 50);
     if (files.isEmpty) return;
+    if (!mounted) return;
 
     // Ask for goal
     final goalCtrl = TextEditingController();
@@ -136,13 +131,17 @@ class _HomePageState extends State<HomePage>
         content: TextField(
           controller: goalCtrl,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '比如：我要给孙子打微信视频',
-          ),
+          decoration: const InputDecoration(hintText: '比如：我要给孙子打微信视频'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, goalCtrl.text.trim()), child: const Text('生成')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, goalCtrl.text.trim()),
+            child: const Text('生成'),
+          ),
         ],
       ),
     );
@@ -152,7 +151,10 @@ class _HomePageState extends State<HomePage>
     final goalText = goal; // narrow to non-null
 
     // Compress images to base64
-    setState(() { _isGenerating = true; _generatingElapsed = 0; });
+    setState(() {
+      _isGenerating = true;
+      _generatingElapsed = 0;
+    });
     // Defer animation to next frame to avoid framework assertion
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _progressCtrl.forward(from: 0);
@@ -171,8 +173,11 @@ class _HomePageState extends State<HomePage>
         if (decoded != null) {
           const maxW = 270;
           final resized = decoded.width > maxW
-              ? img.copyResize(decoded, width: maxW,
-                  height: (decoded.height * maxW / decoded.width).round())
+              ? img.copyResize(
+                  decoded,
+                  width: maxW,
+                  height: (decoded.height * maxW / decoded.width).round(),
+                )
               : decoded;
           final compressed = img.encodeJpg(resized, quality: 50);
           base64s.add('data:image/jpeg;base64,${base64Encode(compressed)}');
@@ -194,7 +199,6 @@ class _HomePageState extends State<HomePage>
         stepCount: result.steps.length,
       );
       await widget.cardRepository.add(card);
-      await _loadCards();
       _progressCtrl.stop();
       setState(() => _isGenerating = false);
       _openCard(card);
@@ -204,7 +208,10 @@ class _HomePageState extends State<HomePage>
       if (mounted) {
         setState(() => _isGenerating = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('生成失败：$error'), backgroundColor: Colors.red.shade700),
+          SnackBar(
+            content: Text('生成失败：$error'),
+            backgroundColor: Colors.red.shade700,
+          ),
         );
       }
     }
@@ -212,137 +219,43 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _startVoice() async {
     if (_isListening || _isGenerating) return;
-
-    // Check permission first
-    final hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('需要麦克风权限才能使用语音输入'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+    if (!await _recorder.hasPermission()) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要麦克风权限'), behavior: SnackBarBehavior.floating));
       return;
     }
-
-    // Start recording
     setState(() => _isListening = true);
     try {
       final filePath = '${Directory.systemTemp.path}/voice_input.m4a';
-
-      // Check if aacLc is supported, fall back gracefully
       final aacOk = await _recorder.isEncoderSupported(AudioEncoder.aacLc);
-      await _recorder.start(
-        RecordConfig(
-          encoder: aacOk ? AudioEncoder.aacLc : AudioEncoder.aacHe,
-          sampleRate: 16000,
-          numChannels: 1,
-          bitRate: aacOk ? 64000 : 32000,
-        ),
-        path: filePath,
-      );
-
-      // Short delay to ensure the recorder actually started
+      await _recorder.start(RecordConfig(encoder: aacOk ? AudioEncoder.aacLc : AudioEncoder.aacHe, sampleRate: 16000, numChannels: 1, bitRate: aacOk ? 64000 : 32000), path: filePath);
       await Future.delayed(const Duration(milliseconds: 500));
-
-      // Show dialog to stop recording
-      if (!mounted) {
-        await _recorder.stop();
-        return;
-      }
-      final shouldStop = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Row(
-            children: [
-              Icon(Icons.mic, color: Colors.red, size: 28),
-              SizedBox(width: 10),
-              Text('正在聆听...'),
-            ],
-          ),
-          content: const Text('请说出你想学的操作，说完后点击"完成"'),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('完成'),
-            ),
-          ],
-        ),
-      );
-
-      // stop() returns the ACTUAL output path (platform may change extension)
+      if (!mounted) { await _recorder.stop(); return; }
+      final shouldStop = await showDialog<bool>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(children: [Icon(Icons.mic, color: Colors.red, size: 28), SizedBox(width: 10), Text('正在聆听...', style: TextStyle(fontWeight: FontWeight.w800))]),
+        content: const Text('请说出你想学的操作，说完后点击"完成"', style: TextStyle(fontSize: 20)),
+        actions: [FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF6B35)), child: const Text('完成'))],
+      ));
       final actualPath = await _recorder.stop();
       setState(() => _isListening = false);
-
       if (shouldStop != true || !mounted) return;
-
-      // Read from the actual path (stop() returns reliable path)
       final audioFile = File(actualPath ?? filePath);
-      if (!await audioFile.exists()) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('录音文件未生成，请重试'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
-
+      if (!await audioFile.exists()) { _showSnack('录音文件未生成'); return; }
       final bytes = await audioFile.readAsBytes();
-      if (bytes.length < 400) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('录音太短（${bytes.length}字节），请说完整句话'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        audioFile.delete().ignore();
-        return;
-      }
-      final base64Audio = base64Encode(bytes);
-
-      final result = await widget.modelClient.transcribeAudio(
-        audioBase64: base64Audio,
-      );
+      if (bytes.length < 400) { _showSnack('录音太短，请说完整句话'); audioFile.delete().ignore(); return; }
+      final text = await widget.modelClient.transcribeAudio(audioBase64: base64Encode(bytes));
       audioFile.delete().ignore();
-
-      if (!mounted || result.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('未识别到语音，请说清楚一点再试'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
-
-      _textController.text = result;
+      if (!mounted || text.isEmpty) { _showSnack('未识别到语音，请说清楚一点再试'); return; }
+      _textController.text = text;
       await Future.delayed(const Duration(milliseconds: 400));
       if (mounted) _generate();
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isListening = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('录音失败：$e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
+    } catch (e) { if (mounted) { setState(() => _isListening = false); _showSnack('录音失败：$e'); } }
   }
 
-  // Voice input handled by _startVoice() above — uses native Android RecognizerIntent
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(fontSize: 18)), behavior: SnackBarBehavior.floating, backgroundColor: Colors.red.shade700));
+  }
 
   void _openCard(SkillCard card) {
     widget.cardRepository.incrementPractice(card.id);
@@ -355,33 +268,6 @@ class _HomePageState extends State<HomePage>
         ),
       ),
     );
-  }
-
-  Future<void> _deleteCard(SkillCard card) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text('删除卡片'),
-        content: Text('确定要删除"${card.title}"吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await widget.cardRepository.remove(card.id);
-      await _loadCards();
-    }
   }
 
   @override
@@ -397,39 +283,73 @@ class _HomePageState extends State<HomePage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F2F7),
-      appBar: AppBar(
-        title: const Text(
-          '学手机',
-          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 22),
+      backgroundColor: const Color(0xFFFFF8F0),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _buildHeroHeader(),
+            if (_isGenerating) _buildProgressBar(),
+            Expanded(child: _buildVoiceFirstHome()),
+            const _BottomNavBar(currentIndex: 0),
+          ],
         ),
-        centerTitle: true,
-        surfaceTintColor: Colors.transparent,
-        backgroundColor: const Color(0xFFF2F2F7),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-            tooltip: '从截图生成卡片',
-            onPressed: _isGenerating ? null : () => _screenshotToCard(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.photo_library_outlined),
-            tooltip: '旧版截图教程',
-            onPressed: () => Navigator.of(context).pushNamed('/screenshot'),
-          ),
-        ],
       ),
-      body: Column(
-        children: [
-          if (_isGenerating) _buildProgressBar(),
-          Expanded(
-            child: _cards.isEmpty && !_isGenerating
-                ? _buildEmptyState()
-                : _buildCardGrid(),
-          ),
-          _buildInputBar(),
-          const _BottomNavBar(currentIndex: 0),
-        ],
+    );
+  }
+
+  Widget _buildHeroHeader() {
+    return Container(
+      height: 128,
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
+      color: const Color(0xFFFFF8F0),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '阿姨，早上好',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 28,
+                      height: 1.12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    '您已连续学习3天，真棒！',
+                    style: TextStyle(
+                      color: Color(0xFFFF6B35),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: '通知',
+              onPressed: () {},
+              icon: Badge(
+                smallSize: 12,
+                backgroundColor: Colors.red,
+                child: Icon(
+                  Icons.notifications_none_rounded,
+                  color: Colors.grey.shade700,
+                  size: 32,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -507,22 +427,22 @@ class _HomePageState extends State<HomePage>
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 400),
                         curve: Curves.easeOutCubic,
-                        width: progress *
-                            (MediaQuery.of(context).size.width - 40),
+                        width:
+                            progress * (MediaQuery.of(context).size.width - 40),
                         height: 4,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
                               const Color(0xFF007AFF),
-                              const Color(0xFF007AFF)
-                                  .withValues(alpha: 0.7),
+                              const Color(0xFF007AFF).withValues(alpha: 0.7),
                             ],
                           ),
                           borderRadius: BorderRadius.circular(3),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF007AFF)
-                                  .withValues(alpha: 0.3),
+                              color: const Color(
+                                0xFF007AFF,
+                              ).withValues(alpha: 0.3),
                               blurRadius: 6,
                               offset: const Offset(0, 1),
                             ),
@@ -552,126 +472,136 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // ── Empty state ────────────────────────────────────────────────
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: const Color(0xFF007AFF).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: const Icon(
-                Icons.chat_bubble_outline_rounded,
-                size: 48,
-                color: Color(0xFF007AFF),
-              ),
+  Widget _buildVoiceFirstHome() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 18),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: (constraints.maxHeight - 34).clamp(0, double.infinity),
             ),
-            const SizedBox(height: 24),
-            const Text(
-              '告诉我你想学什么',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1C1C1E),
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '在下方输入你想学的手机操作\n比如"给孙子打视频"、"发微信语音"',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                color: Color(0xFF8E8E93),
-                height: 1.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Card grid ──────────────────────────────────────────────────
-
-  Widget _buildCardGrid() {
-    return RefreshIndicator(
-      onRefresh: _loadCards,
-      child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.85,
-        ),
-        itemCount: _cards.length + (_isGenerating ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (_isGenerating && index == 0) {
-            return _buildGeneratingCard();
-          }
-          final cardIndex = _isGenerating ? index - 1 : index;
-          return _buildCard(_cards[cardIndex]);
-        },
-      ),
-    );
-  }
-
-  Widget _buildGeneratingCard() {
-    return AnimatedBuilder(
-      animation: _progressAnim,
-      builder: (context, child) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: const Color(0xFF007AFF).withValues(alpha: 0.15),
-              width: 2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Center(
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    color: Color(0xFF007AFF),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 420),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 28,
+                    vertical: 34,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(32),
+                    border: Border.all(
+                      color: _isListening
+                          ? const Color(0xFF003366).withValues(alpha: 0.42)
+                          : const Color(0xFF003366),
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF6B35).withValues(alpha: 0.15),
+                        blurRadius: 25,
+                        offset: const Offset(0, 10),
+                      ),
+                      BoxShadow(
+                        color: const Color(
+                          0xFF003366,
+                        ).withValues(alpha: _isListening ? 0.34 : 0.16),
+                        blurRadius: _isListening ? 20 : 5,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    _isGenerating
+                        ? '正在帮您生成教程...'
+                        : _isListening
+                        ? '我在听，慢慢说'
+                        : '按下面，对我说：\n想学什么？',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _isGenerating || _isListening
+                          ? const Color(0xFF003366)
+                          : Colors.grey.shade400,
+                      fontSize: 24,
+                      height: 1.42,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 280),
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    color: _isListening
+                        ? Colors.red.shade500
+                        : const Color(0xFFFF6B35),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF6B35).withValues(alpha: 0.36),
+                        blurRadius: _isListening ? 28 : 18,
+                        spreadRadius: _isListening ? 14 : 2,
+                      ),
+                      const BoxShadow(
+                        color: Color(0x33000000),
+                        blurRadius: 16,
+                        offset: Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: IconButton(
+                    tooltip: '语音输入',
+                    onPressed: _isGenerating || _isListening
+                        ? null
+                        : _startVoice,
+                    icon: const Icon(
+                      Icons.mic_rounded,
+                      color: Colors.white,
+                      size: 44,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  '${_generatingElapsed}s',
+                  _isGenerating ? '生成中，请稍等' : '点击说话',
                   style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF007AFF),
+                    color: Color(0xFF003366),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  '正在生成...',
-                  style: TextStyle(
-                    color: Color(0xFF8E8E93),
-                    fontSize: 13,
-                  ),
+                const SizedBox(height: 32),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _SecondaryAction(
+                        icon: Icons.keyboard_rounded,
+                        label: '打字输入',
+                        onTap: _isGenerating ? null : _showTextInputSheet,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _SecondaryAction(
+                        icon: Icons.add_photo_alternate_outlined,
+                        label: '上传截图',
+                        onTap: _isGenerating ? null : _screenshotToCard,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                TextButton.icon(
+                  onPressed: () =>
+                      Navigator.of(context).pushNamed('/screenshot'),
+                  icon: const Icon(Icons.collections_outlined),
+                  label: const Text('打开图片教程生成器'),
                 ),
               ],
             ),
@@ -681,176 +611,104 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  Widget _buildCard(SkillCard card) {
-    return GestureDetector(
-      onTap: () => _openCard(card),
-      onLongPress: () => _deleteCard(card),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(18),
+  Future<void> _showTextInputSheet() async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            24,
+            24,
+            MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF007AFF).withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.smartphone_rounded,
-                  color: Color(0xFF007AFF),
-                  size: 24,
-                ),
+              const Text(
+                '您想学什么？',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
               ),
-              const Spacer(),
-              Text(
-                card.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1C1C1E),
-                  height: 1.2,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(Icons.touch_app, size: 13, color: Colors.grey.shade500),
-                  const SizedBox(width: 3),
-                  Text(
-                    '${card.stepCount} 步',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _textController,
+                focusNode: _focusNode,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  hintText: '比如：我要给孙子打微信视频',
+                  filled: true,
+                  fillColor: const Color(0xFFFFF8F0),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide.none,
                   ),
-                  const Spacer(),
-                  if (card.timesPracticed > 0)
-                    Text(
-                      '练${card.timesPracticed}次',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.green.shade600,
-                        fontWeight: FontWeight.w600,
-                      ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.pop(ctx, _textController.text.trim()),
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: const Text('生成教程'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF6B35),
+                    foregroundColor: Colors.white,
+                    textStyle: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
                     ),
-                ],
+                  ),
+                ),
               ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
+    if (!mounted || result == null || result.isEmpty) return;
+    _textController.text = result;
+    await _generate();
   }
+}
 
-  // ── Input bar ──────────────────────────────────────────────────
+class _SecondaryAction extends StatelessWidget {
+  const _SecondaryAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
-  Widget _buildInputBar() {
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        16,
-        8,
-        16,
-        MediaQuery.of(context).padding.bottom + 12,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F2F7),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 56,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 22),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF003366),
+          side: const BorderSide(color: Color(0xFF003366), width: 1.5),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: _isGenerating ? Colors.grey.shade100 : Colors.white,
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(
-                  color: _isGenerating
-                      ? const Color(0xFF007AFF).withValues(alpha: 0.4)
-                      : _isListening
-                          ? const Color(0xFF007AFF).withValues(alpha: 0.35)
-                          : Colors.grey.withValues(alpha: 0.12),
-                  width: (_isGenerating || _isListening) ? 2 : 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.02),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: TextField(
-                controller: _textController,
-                focusNode: _focusNode,
-                enabled: !_isGenerating,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _generate(),
-                style: const TextStyle(fontSize: 16),
-                decoration: InputDecoration(
-                  hintText: _isListening
-                      ? '正在聆听，再次点击麦克风结束...'
-                      : _isGenerating
-                          ? '正在生成中...'
-                          : '打字或点击麦克风说话...',
-                  hintStyle: TextStyle(
-                    color: _isListening
-                        ? const Color(0xFF007AFF)
-                        : Colors.grey.shade400,
-                    fontSize: 15,
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
-                  ),
-                  suffixIcon: _textController.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.send_rounded, size: 22),
-                          color: const Color(0xFF007AFF),
-                          onPressed: _isGenerating ? null : _generate,
-                        )
-                      : null,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          // Voice button — one tap to start system voice dialog
-          IconButton(
-            onPressed: _isGenerating || _isListening ? null : _startVoice,
-            icon: const Icon(Icons.mic, size: 24),
-            style: IconButton.styleFrom(
-              backgroundColor: _isListening
-                  ? Colors.red
-                  : const Color(0xFF007AFF),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.all(14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(26),
-              ),
-            ),
-          ),
-        ],
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+        ),
       ),
     );
   }
@@ -863,21 +721,57 @@ class _BottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, -2))]),
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
-      height: 56 + MediaQuery.of(context).padding.bottom,
-      child: Row(children: [
-        _NavItem(icon: Icons.home_rounded, label: '首页', active: currentIndex == 0, onTap: () {}),
-        _NavItem(icon: Icons.emoji_events_rounded, label: '成就', active: false, onTap: () {
-          Navigator.of(context).pushNamed('/achievements');
-        }),
-      ]),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.88),
+        border: Border(
+          top: BorderSide(
+            color: Colors.black.withValues(alpha: 0.10),
+            width: 2,
+          ),
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        32,
+        12,
+        32,
+        MediaQuery.of(context).padding.bottom + 12,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _NavItem(
+            icon: Icons.home_outlined,
+            label: '首页',
+            active: currentIndex == 0,
+            onTap: () {},
+          ),
+          _NavItem(
+            icon: Icons.military_tech_rounded,
+            label: '成就',
+            active: false,
+            onTap: () {
+              Navigator.of(context).pushNamed('/achievements');
+            },
+          ),
+          _NavItem(
+            icon: Icons.person_outline_rounded,
+            label: '我的',
+            active: false,
+            onTap: () {},
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _NavItem extends StatelessWidget {
-  const _NavItem({required this.icon, required this.label, required this.active, required this.onTap});
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final bool active;
@@ -885,14 +779,30 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 28, color: active ? const Color(0xFFFF6B35) : Colors.grey),
-          const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: active ? const Color(0xFFFF6B35) : Colors.grey)),
-        ]),
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 30,
+              color: active ? const Color(0xFFFF6B35) : Colors.black,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: active ? const Color(0xFFFF6B35) : Colors.black,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

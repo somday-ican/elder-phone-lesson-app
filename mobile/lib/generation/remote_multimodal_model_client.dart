@@ -332,6 +332,7 @@ class RemoteMultimodalModelClient implements ModelClient {
   @override
   Future<String> transcribeAudio({
     required String audioBase64,
+    String mimeType = 'audio/m4a',
   }) async {
     final url = Uri.parse('${endpoint.origin}/api/transcribe');
     final client = HttpClient()..connectionTimeout = timeout;
@@ -340,7 +341,7 @@ class RemoteMultimodalModelClient implements ModelClient {
       final request = await client.postUrl(url).timeout(timeout);
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode({
-        'audio': 'data:audio/wav;base64,$audioBase64',
+        'audio': 'data:$mimeType;base64,$audioBase64',
       }));
 
       final response = await request.close().timeout(timeout);

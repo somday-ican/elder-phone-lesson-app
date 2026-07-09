@@ -48,5 +48,6 @@ abstract class ModelClient {
 
   Future<String> transcribeAudio({
     required String audioBase64,
+    String mimeType = 'audio/m4a',
   });
 }

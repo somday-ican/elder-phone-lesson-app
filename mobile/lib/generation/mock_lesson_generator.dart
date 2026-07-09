@@ -301,7 +301,7 @@ ${buttons.toString()}
   }
 
   @override
-  Future<String> transcribeAudio({required String audioBase64}) async {
+  Future<String> transcribeAudio({required String audioBase64, String mimeType = 'audio/m4a'}) async {
     return '语音识别测试文字';
   }
 
