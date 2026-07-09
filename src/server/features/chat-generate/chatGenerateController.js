@@ -44,12 +44,13 @@ export async function chatGenerateController(req, res, config) {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        model: config.aiUiModelName,
-        temperature: 0.4,
+        model: config.aiModelName, // Use gpt-5.5 for quality UI generation
+        temperature: 0.35,
+        max_tokens: 8192,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: prompt.system },
-          { role: "user", content: [{ type: "text", text: prompt.user }] }
+          { role: "user", content: prompt.userContent }
         ]
       })
     });
