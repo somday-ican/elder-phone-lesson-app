@@ -71,9 +71,10 @@ class _HomePageState extends State<HomePage>
       _isGenerating = true;
       _generatingElapsed = 0;
     });
-
-    // Start animated progress bar
-    _progressCtrl.forward(from: 0);
+    // Defer animation to next frame to avoid framework assertion
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _progressCtrl.forward(from: 0);
+    });
 
     // Timer for elapsed seconds display
     _generatingTimer?.cancel();
@@ -152,7 +153,10 @@ class _HomePageState extends State<HomePage>
 
     // Compress images to base64
     setState(() { _isGenerating = true; _generatingElapsed = 0; });
-    _progressCtrl.forward(from: 0);
+    // Defer animation to next frame to avoid framework assertion
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _progressCtrl.forward(from: 0);
+    });
     _generatingTimer?.cancel();
     _generatingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _generatingElapsed++);
