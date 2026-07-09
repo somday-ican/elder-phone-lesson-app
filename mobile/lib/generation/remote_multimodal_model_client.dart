@@ -72,8 +72,7 @@ class RemoteMultimodalModelClient implements ModelClient {
               {
                 'index': frame.index,
                 'timeMs': frame.time.inMilliseconds,
-                'image':
-                    'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
+                'image': 'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
                 if (frame.touchTarget != null)
                   'touchCandidate': frame.touchTarget!.toJson(),
               },
@@ -202,7 +201,8 @@ class RemoteMultimodalModelClient implements ModelClient {
               },
           ],
           'markedPositions': [
-            for (final pos in markedPositions) {'x': pos.x, 'y': pos.y},
+            for (final pos in markedPositions)
+              {'x': pos.x, 'y': pos.y},
           ],
           'goal': goal,
         }),
@@ -244,7 +244,8 @@ class RemoteMultimodalModelClient implements ModelClient {
         jsonEncode({
           'screenshot': {
             'index': frame.index,
-            'image': 'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
+            'image':
+                'data:image/jpeg;base64,${_compressForApi(frame.bytes)}',
           },
           'markedPosition': {'x': markedX, 'y': markedY},
           'goal': goal,
@@ -261,8 +262,8 @@ class RemoteMultimodalModelClient implements ModelClient {
       }
 
       final payload = jsonDecode(body) as Map<String, Object?>;
-      final analysisJson = (payload['analysis'] as Map?)
-          ?.cast<String, Object?>();
+      final analysisJson =
+          (payload['analysis'] as Map?)?.cast<String, Object?>();
       if (analysisJson == null) {
         return null;
       }
@@ -296,10 +297,7 @@ class RemoteMultimodalModelClient implements ModelClient {
       );
 
       final response = await request.close().timeout(chatTimeout);
-      final body = await utf8.decoder
-          .bind(response)
-          .join()
-          .timeout(chatTimeout);
+      final body = await utf8.decoder.bind(response).join().timeout(chatTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw HttpException(
           'Chat generate API returned ${response.statusCode}: $body',
@@ -309,15 +307,16 @@ class RemoteMultimodalModelClient implements ModelClient {
 
       final payload = jsonDecode(body) as Map<String, Object?>;
 
-      final stepsJson =
-          (payload['steps'] as List?)?.map((s) {
+      final stepsJson = (payload['steps'] as List?)
+          ?.map((s) {
             final m = (s as Map).cast<String, Object?>();
             return (
               stepIndex: (m['stepIndex'] as num?)?.toInt() ?? 0,
               instruction: m['instruction'] as String? ?? '',
               elderTip: m['elderTip'] as String? ?? '',
             );
-          }).toList() ??
+          })
+          .toList() ??
           [];
 
       return ChatGenerationResult(
@@ -341,9 +340,9 @@ class RemoteMultimodalModelClient implements ModelClient {
     try {
       final request = await client.postUrl(url).timeout(timeout);
       request.headers.contentType = ContentType.json;
-      request.write(
-        jsonEncode({'audio': 'data:$mimeType;base64,$audioBase64'}),
-      );
+      request.write(jsonEncode({
+        'audio': 'data:$mimeType;base64,$audioBase64',
+      }));
 
       final response = await request.close().timeout(timeout);
       final body = await utf8.decoder.bind(response).join().timeout(timeout);

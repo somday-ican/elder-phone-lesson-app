@@ -489,95 +489,51 @@ class _LearningRecords extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allCards = [...cards, ..._defaultHistoryCards];
-    return Column(
-      children: [
-        for (final indexed in allCards.indexed) ...[
-          _RecordCard.fromSkillCard(
-            indexed.$2,
-            index: indexed.$1,
-            onTap: () => onOpenCard(indexed.$2),
-          ),
-          if (indexed.$1 != allCards.length - 1) const SizedBox(height: 16),
+    if (cards.isNotEmpty) {
+      return Column(
+        children: [
+          for (final indexed in cards.indexed) ...[
+            _RecordCard.fromSkillCard(
+              indexed.$2,
+              index: indexed.$1,
+              onTap: () => onOpenCard(indexed.$2),
+            ),
+            if (indexed.$1 != cards.length - 1) const SizedBox(height: 16),
+          ],
         ],
+      );
+    }
+
+    return const Column(
+      children: [
+        _RecordCard(
+          icon: Icons.video_call_outlined,
+          iconColor: _AchievementPageState._primary,
+          iconBg: Color(0x1AFF6B35),
+          title: '视频通话练习',
+          duration: '15分钟',
+          date: '2026-07-06',
+        ),
+        SizedBox(height: 16),
+        _RecordCard(
+          icon: Icons.share_outlined,
+          iconColor: Color(0xFF2E7D32),
+          iconBg: Color(0xFFE8F5E9),
+          title: '如何发朋友圈',
+          duration: '22分钟',
+          date: '2026-07-05',
+        ),
+        SizedBox(height: 16),
+        _RecordCard(
+          icon: Icons.qr_code_scanner_rounded,
+          iconColor: Color(0xFF1976D2),
+          iconBg: Color(0xFFE3F2FD),
+          title: '扫码支付技巧',
+          duration: '10分钟',
+          date: '2026-07-04',
+        ),
       ],
     );
-  }
-
-  static final List<SkillCard> _defaultHistoryCards = [
-    SkillCard(
-      id: 'default-video-call',
-      title: '视频通话练习',
-      html: _demoHtml('视频通话练习', ['打开微信', '找到联系人', '点击视频通话']),
-      stepCount: 3,
-      createdAt: DateTime(2026, 7, 6),
-    ),
-    SkillCard(
-      id: 'default-moments',
-      title: '如何发朋友圈',
-      html: _demoHtml('如何发朋友圈', ['进入发现页', '打开朋友圈', '点击发布']),
-      stepCount: 3,
-      createdAt: DateTime(2026, 7, 5),
-    ),
-    SkillCard(
-      id: 'default-scan-pay',
-      title: '扫码支付技巧',
-      html: _demoHtml('扫码支付技巧', ['打开扫一扫', '对准二维码', '确认付款']),
-      stepCount: 3,
-      createdAt: DateTime(2026, 7, 4),
-    ),
-  ];
-
-  static String _demoHtml(String title, List<String> steps) {
-    final buttons = steps.indexed.map((item) {
-      final step = item.$1 + 1;
-      final label = item.$2;
-      final top = 150 + item.$1 * 120;
-      return '''
-        <button class="target" style="top:${top}px" onclick="onTargetClick($step)">
-          <span class="badge">$step</span>$label
-        </button>
-      ''';
-    }).join();
-
-    return '''
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#f7f8fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202124}
-.phone{position:relative;width:100vw;min-height:620px;padding:28px 22px;background:linear-gradient(#fff,#f7f8fb)}
-h1{margin:0 0 10px;font-size:26px;font-weight:900}
-p{margin:0 0 28px;color:#6b7280;font-size:17px;font-weight:700}
-.target{position:absolute;left:50%;transform:translateX(-50%);width:245px;height:72px;border:0;border-radius:22px;background:#0b84ff;color:white;font-size:24px;font-weight:900;box-shadow:0 8px 0 #0065c7,0 12px 22px rgba(0,0,0,.15)}
-.target:active{transform:translate(-50%,4px);box-shadow:0 4px 0 #0065c7}
-.badge{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;margin-right:12px;border-radius:50%;background:rgba(255,255,255,.24)}
-.hint{position:absolute;left:22px;right:22px;bottom:32px;padding:18px;border-radius:20px;background:#fff;border:2px solid #e5e7eb;font-size:18px;font-weight:800;color:#4b5563}
-</style>
-</head>
-<body>
-<div class="phone">
-  <h1>$title</h1>
-  <p>请按顺序点击蓝色按钮完成练习</p>
-  $buttons
-  <div class="hint">点对后会出现绿色反馈，点错会提示你重新找位置。</div>
-</div>
-<script>
-function onTargetClick(step) {}
-window.__setPracticeStep = function(step) {
-  document.querySelectorAll('.target').forEach(function(el, i) {
-    var active = i + 1 === step;
-    el.style.opacity = active ? '1' : '.35';
-    el.style.pointerEvents = active ? 'auto' : 'auto';
-  });
-};
-window.__setPracticeStep(1);
-</script>
-</body>
-</html>
-''';
   }
 }
 

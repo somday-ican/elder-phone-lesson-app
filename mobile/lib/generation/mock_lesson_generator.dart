@@ -184,8 +184,7 @@ class MockLessonGenerator implements ModelClient {
         </button>''');
     }
 
-    final html =
-        '''<!DOCTYPE html>
+    final html = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -258,8 +257,7 @@ function onTargetClick(step) {
         </button>''');
     }
 
-    final html =
-        '''<!DOCTYPE html>
+    final html = '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
@@ -295,22 +293,20 @@ ${buttons.toString()}
 <script>function onTargetClick(n){if(window.TargetBridge)window.TargetBridge.postMessage(JSON.stringify({event:"target_click",stepIndex:n}))}</script>
 </body></html>''';
 
-    return ChatGenerationResult(html: html, title: goal, steps: steps);
+    return ChatGenerationResult(
+      html: html,
+      title: goal,
+      steps: steps,
+    );
   }
 
   @override
-  Future<String> transcribeAudio({
-    required String audioBase64,
-    String mimeType = 'audio/m4a',
-  }) async {
+  Future<String> transcribeAudio({required String audioBase64, String mimeType = 'audio/m4a'}) async {
     return '语音识别测试文字';
   }
 
   String _escapeHtml(String s) {
-    return s
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;');
+    return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   }
 
   @override
