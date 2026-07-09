@@ -32,6 +32,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
   bool _pageLoaded = false;
   bool _processingTap = false;
   DateTime? _lastTargetClickAt;
+  DateTime? _ignoreWrongClicksUntil;
   Timer? _pendingWrongFeedbackTimer;
 
   @override
@@ -185,6 +186,12 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
   }
 
   void _onWrongClick() {
+    final ignoreWrongClicksUntil = _ignoreWrongClicksUntil;
+    if (ignoreWrongClicksUntil != null &&
+        DateTime.now().isBefore(ignoreWrongClicksUntil)) {
+      return;
+    }
+
     final lastTargetClickAt = _lastTargetClickAt;
     if (lastTargetClickAt != null &&
         DateTime.now().difference(lastTargetClickAt).inMilliseconds < 700) {
@@ -225,6 +232,7 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
 
   Future<void> _continueAfterCorrect() async {
     final completed = _currentStep >= widget.targetCount;
+    _suppressWebViewWrongClicks();
 
     if (!mounted) return;
     setState(() {
@@ -243,10 +251,19 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
   }
 
   void _dismissWrongFeedback() {
+    _suppressWebViewWrongClicks();
     setState(() {
       _feedbackKind = null;
       _processingTap = false;
     });
+  }
+
+  void _suppressWebViewWrongClicks() {
+    _ignoreWrongClicksUntil = DateTime.now().add(
+      const Duration(milliseconds: 700),
+    );
+    _pendingWrongFeedbackTimer?.cancel();
+    _pendingWrongFeedbackTimer = null;
   }
 
   @override
@@ -350,57 +367,59 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
             child: Column(
               children: [
                 // Progress bar
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                child: Row(
-                  children: [
-                    for (var i = 1; i <= widget.targetCount; i++)
-                      Expanded(
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          height: 4,
-                          margin: const EdgeInsets.symmetric(horizontal: 2),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(2),
-                            color: i < _currentStep
-                                ? const Color(0xFF58CC02)
-                                : i == _currentStep
-                                ? const Color(0xFF1CB0F6)
-                                : const Color(0xFFE5E5E5),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Row(
+                    children: [
+                      for (var i = 1; i <= widget.targetCount; i++)
+                        Expanded(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            height: 4,
+                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(2),
+                              color: i < _currentStep
+                                  ? const Color(0xFF58CC02)
+                                  : i == _currentStep
+                                  ? const Color(0xFF1CB0F6)
+                                  : const Color(0xFFE5E5E5),
+                            ),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-              ),
-              // Step indicator
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 4,
-                ),
-                child: Text(
-                  '第 $_currentStep 步 / 共 ${widget.targetCount} 步',
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                ),
-              ),
-              // Loading spinner while page loads
-              if (!_pageLoaded)
-                const Expanded(
-                  child: Center(
-                    child: CircularProgressIndicator(color: Color(0xFF58CC02)),
+                    ],
                   ),
                 ),
-              // WebView
-              Expanded(
-                child: Opacity(
-                  opacity: _pageLoaded ? 1.0 : 0.0,
-                  child: WebViewWidget(controller: _controller),
+                // Step indicator
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 4,
+                  ),
+                  child: Text(
+                    '第 $_currentStep 步 / 共 ${widget.targetCount} 步',
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                  ),
                 ),
-              ),
-            ],
+                // Loading spinner while page loads
+                if (!_pageLoaded)
+                  const Expanded(
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        color: Color(0xFF58CC02),
+                      ),
+                    ),
+                  ),
+                // WebView
+                Expanded(
+                  child: Opacity(
+                    opacity: _pageLoaded ? 1.0 : 0.0,
+                    child: WebViewWidget(controller: _controller),
+                  ),
+                ),
+              ],
             ),
-            ), // AbsorbPointer
+          ), // AbsorbPointer
           _DuolingoFeedbackPanel(
             kind: _feedbackKind,
             onContinue: _continueAfterCorrect,
@@ -444,9 +463,14 @@ class _DuolingoFeedbackPanel extends StatelessWidget {
     // blocks ALL touch events from reaching the WebView's platform view layer.
     // IgnorePointer/AbsorbPointer are ineffective against Android WebView.
     return Positioned.fill(
-      left: 0, top: 0, right: 0, bottom: 0,
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
       child: GestureDetector(
-        behavior: visible ? HitTestBehavior.opaque : HitTestBehavior.translucent,
+        behavior: visible
+            ? HitTestBehavior.opaque
+            : HitTestBehavior.translucent,
         onTap: visible ? () {} : null,
         child: Align(
           alignment: Alignment.bottomCenter,
@@ -475,90 +499,90 @@ class _DuolingoFeedbackPanel extends StatelessWidget {
                     ),
                   ],
                 ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: baseColor,
-                          shape: BoxShape.circle,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: baseColor,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            correct ? Icons.check_rounded : Icons.close_rounded,
+                            color: Colors.white,
+                            size: 25,
+                          ),
                         ),
-                        child: Icon(
-                          correct ? Icons.check_rounded : Icons.close_rounded,
-                          color: Colors.white,
-                          size: 25,
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              color: correct ? _greenDark : _redDark,
+                              fontSize: 32,
+                              height: 1,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () {},
+                          icon: Icon(
+                            Icons.ios_share_rounded,
+                            color: correct ? _greenDark : _redDark,
+                            size: 30,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () {},
+                          icon: Icon(
+                            Icons.flag_outlined,
+                            color: correct ? _greenDark : _redDark,
+                            size: 30,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!correct) ...[
+                      const SizedBox(height: 18),
+                      Text(
+                        '请点击屏幕上蓝色高亮的正确位置',
+                        style: TextStyle(
+                          color: _redDark,
+                          fontSize: 22,
+                          height: 1.25,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
+                    ],
+                    const SizedBox(height: 28),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 64,
+                      child: _BouncyFeedbackButton(
+                        color: baseColor,
+                        shadowColor: shadowColor,
+                        onPressed: correct ? onContinue : onDismissWrong,
                         child: Text(
-                          title,
-                          style: TextStyle(
-                            color: correct ? _greenDark : _redDark,
-                            fontSize: 32,
-                            height: 1,
+                          buttonText,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
                       ),
-                      IconButton(
-                        onPressed: () {},
-                        icon: Icon(
-                          Icons.ios_share_rounded,
-                          color: correct ? _greenDark : _redDark,
-                          size: 30,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () {},
-                        icon: Icon(
-                          Icons.flag_outlined,
-                          color: correct ? _greenDark : _redDark,
-                          size: 30,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (!correct) ...[
-                    const SizedBox(height: 18),
-                    Text(
-                      '请点击屏幕上蓝色高亮的正确位置',
-                      style: TextStyle(
-                        color: _redDark,
-                        fontSize: 22,
-                        height: 1.25,
-                        fontWeight: FontWeight.w800,
-                      ),
                     ),
                   ],
-                  const SizedBox(height: 28),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 64,
-                    child: _BouncyFeedbackButton(
-                      color: baseColor,
-                      shadowColor: shadowColor,
-                      onPressed: correct ? onContinue : onDismissWrong,
-                      child: Text(
-                        buttonText,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ), // AnimatedOpacity
-        ), // AnimatedSlide
+            ), // AnimatedOpacity
+          ), // AnimatedSlide
         ), // Align
       ), // GestureDetector
     ); // Positioned
