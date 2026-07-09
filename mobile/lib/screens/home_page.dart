@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -20,18 +22,35 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   final _textController = TextEditingController();
   final _focusNode = FocusNode();
   late stt.SpeechToText _speech;
-  bool _speechAvailable = false;
+  bool _speechInitialized = false;
   bool _isListening = false;
   bool _isGenerating = false;
   List<SkillCard> _cards = [];
+  int _generatingElapsed = 0;
+  Timer? _generatingTimer;
+
+  // Progress bar animation
+  late AnimationController _progressCtrl;
+  late Animation<double> _progressAnim;
 
   @override
   void initState() {
     super.initState();
+    _progressCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 80),
+    );
+    _progressAnim = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.15), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 0.15, end: 0.45), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 0.45, end: 0.75), weight: 3),
+      TweenSequenceItem(tween: Tween(begin: 0.75, end: 0.90), weight: 4),
+    ]).animate(_progressCtrl);
     _initSpeech();
     _loadCards();
   }
@@ -40,18 +59,21 @@ class _HomePageState extends State<HomePage> {
     _speech = stt.SpeechToText();
     try {
       final available = await _speech.initialize(
-        onStatus: (s) {
-          if (s == 'done' || s == 'notListening') {
-            setState(() => _isListening = false);
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _isListening = false);
+          }
+          if (status == 'listening') {
+            if (mounted) setState(() => _isListening = true);
           }
         },
         onError: (_) {
-          setState(() => _isListening = false);
+          if (mounted) setState(() => _isListening = false);
         },
       );
-      setState(() => _speechAvailable = available);
+      if (mounted) setState(() => _speechInitialized = available);
     } catch (_) {
-      setState(() => _speechAvailable = false);
+      if (mounted) setState(() => _speechInitialized = false);
     }
   }
 
@@ -64,10 +86,24 @@ class _HomePageState extends State<HomePage> {
     final goal = _textController.text.trim();
     if (goal.isEmpty || _isGenerating) return;
 
-    setState(() => _isGenerating = true);
+    _focusNode.unfocus();
+    setState(() {
+      _isGenerating = true;
+      _generatingElapsed = 0;
+    });
+
+    // Start animated progress bar
+    _progressCtrl.forward(from: 0);
+
+    // Timer for elapsed seconds display
+    _generatingTimer?.cancel();
+    _generatingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _generatingElapsed++);
+    });
 
     try {
       final result = await widget.modelClient.chatGenerate(goal: goal);
+      _generatingTimer?.cancel();
       if (!mounted) return;
 
       final card = SkillCard.create(
@@ -80,17 +116,23 @@ class _HomePageState extends State<HomePage> {
       await _loadCards();
       _textController.clear();
 
-      setState(() => _isGenerating = false);
-
-      // Auto-open the new card for practice
+      // Complete the progress bar
+      _progressCtrl.stop();
+      setState(() {
+        _isGenerating = false;
+      });
       _openCard(card);
     } catch (error) {
+      _generatingTimer?.cancel();
+      _progressCtrl.stop();
       if (mounted) {
         setState(() => _isGenerating = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('生成失败：$error'),
+            content: Text('生成失败：${error.toString().replaceFirst("Exception: ", "")}'),
             behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -98,40 +140,76 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _startListening() async {
-    if (!_speechAvailable) return;
+    // Try to init if not already
+    if (!_speechInitialized) {
+      await _initSpeech();
+    }
+    if (!_speechInitialized) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('语音功能未就绪，请在设置中允许麦克风权限'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Stop any ongoing session first
+    if (_isListening) {
+      await _speech.stop();
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+
     try {
       await _speech.listen(
         onResult: (result) {
-          _textController.text = result.recognizedWords;
+          if (!mounted) return;
+          setState(() {
+            _textController.text = result.recognizedWords;
+          });
           if (result.finalResult) {
             setState(() => _isListening = false);
+            // Auto-submit after voice input completes
+            if (_textController.text.trim().isNotEmpty) {
+              _generate();
+            }
           }
         },
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
         // ignore: deprecated_member_use
         localeId: 'zh_CN',
+        cancelOnError: false,
+        partialResults: true,
       );
-      setState(() => _isListening = true);
+      if (mounted) setState(() => _isListening = true);
     } catch (_) {
-      // Fallback to system default locale
+      // Fallback without locale
       try {
         await _speech.listen(
           onResult: (result) {
-            _textController.text = result.recognizedWords;
+            if (!mounted) return;
+            setState(() {
+              _textController.text = result.recognizedWords;
+            });
             if (result.finalResult) {
               setState(() => _isListening = false);
+              if (_textController.text.trim().isNotEmpty) {
+                _generate();
+              }
             }
           },
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 3),
+          partialResults: true,
         );
-        setState(() => _isListening = true);
+        if (mounted) setState(() => _isListening = true);
       } catch (_) {
-        setState(() => _isListening = false);
+        if (mounted) setState(() => _isListening = false);
       }
     }
-  }
-
-  void _stopListening() {
-    _speech.stop();
-    setState(() => _isListening = false);
   }
 
   void _openCard(SkillCard card) {
@@ -153,7 +231,7 @@ class _HomePageState extends State<HomePage> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text('删除卡片'),
-        content: Text('确定要删除「${card.title}」吗？'),
+        content: Text('确定要删除"${card.title}"吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -178,6 +256,9 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _textController.dispose();
     _focusNode.dispose();
+    _generatingTimer?.cancel();
+    _progressCtrl.dispose();
+    _speech.stop();
     super.dispose();
   }
 
@@ -197,14 +278,13 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.photo_library_outlined),
             tooltip: '截图教程',
-            onPressed: () {
-              Navigator.of(context).pushNamed('/screenshot');
-            },
+            onPressed: () => Navigator.of(context).pushNamed('/screenshot'),
           ),
         ],
       ),
       body: Column(
         children: [
+          if (_isGenerating) _buildProgressBar(),
           Expanded(
             child: _cards.isEmpty && !_isGenerating
                 ? _buildEmptyState()
@@ -215,6 +295,126 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+  // ── Smooth animated progress bar ──────────────────────────────
+
+  Widget _buildProgressBar() {
+    final minutes = _generatingElapsed ~/ 60;
+    final seconds = _generatingElapsed % 60;
+    final timeStr = minutes > 0 ? '$minutes分$seconds秒' : '$seconds秒';
+
+    return AnimatedBuilder(
+      animation: _progressAnim,
+      builder: (context, child) {
+        final progress = _progressAnim.value;
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF007AFF).withValues(alpha: 0.05),
+            border: Border(
+              bottom: BorderSide(
+                color: const Color(0xFF007AFF).withValues(alpha: 0.1),
+              ),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(
+                        const Color(0xFF007AFF).withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'AI 正在生成教程',
+                    style: TextStyle(
+                      color: const Color(0xFF007AFF).withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    timeStr,
+                    style: TextStyle(
+                      color: const Color(0xFF007AFF).withValues(alpha: 0.5),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007AFF).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Row(
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                        width: progress *
+                            (MediaQuery.of(context).size.width - 40),
+                        height: 4,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              const Color(0xFF007AFF),
+                              const Color(0xFF007AFF)
+                                  .withValues(alpha: 0.7),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF007AFF)
+                                  .withValues(alpha: 0.3),
+                              blurRadius: 6,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${(progress * 100).round()}%',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: const Color(0xFF007AFF).withValues(alpha: 0.4),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Empty state ────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
     return Center(
@@ -238,7 +438,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 24),
             const Text(
-              '告诉我想学什么',
+              '告诉我你想学什么',
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
@@ -261,6 +461,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ── Card grid ──────────────────────────────────────────────────
+
   Widget _buildCardGrid() {
     return RefreshIndicator(
       onRefresh: _loadCards,
@@ -274,7 +476,6 @@ class _HomePageState extends State<HomePage> {
         ),
         itemCount: _cards.length + (_isGenerating ? 1 : 0),
         itemBuilder: (context, index) {
-          // Generating card placeholder
           if (_isGenerating && index == 0) {
             return _buildGeneratingCard();
           }
@@ -286,43 +487,59 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGeneratingCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFF007AFF).withValues(alpha: 0.2),
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
+    return AnimatedBuilder(
+      animation: _progressAnim,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF007AFF).withValues(alpha: 0.15),
+              width: 2,
             ),
-            SizedBox(height: 14),
-            Text(
-              '正在生成...',
-              style: TextStyle(
-                color: Color(0xFF007AFF),
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
+            ],
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '${_generatingElapsed}s',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '正在生成...',
+                  style: TextStyle(
+                    color: Color(0xFF8E8E93),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -348,7 +565,6 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icon
               Container(
                 width: 44,
                 height: 44,
@@ -363,7 +579,6 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               const Spacer(),
-              // Title
               Text(
                 card.title,
                 maxLines: 2,
@@ -376,17 +591,13 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               const SizedBox(height: 6),
-              // Meta info
               Row(
                 children: [
                   Icon(Icons.touch_app, size: 13, color: Colors.grey.shade500),
                   const SizedBox(width: 3),
                   Text(
                     '${card.stepCount} 步',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade500,
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                   ),
                   const Spacer(),
                   if (card.timesPracticed > 0)
@@ -406,6 +617,8 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+  // ── Input bar ──────────────────────────────────────────────────
 
   Widget _buildInputBar() {
     return Container(
@@ -430,13 +643,15 @@ class _HomePageState extends State<HomePage> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: _isGenerating ? Colors.grey.shade100 : Colors.white,
                 borderRadius: BorderRadius.circular(28),
                 border: Border.all(
                   color: _isGenerating
                       ? const Color(0xFF007AFF).withValues(alpha: 0.4)
-                      : Colors.grey.withValues(alpha: 0.12),
-                  width: _isGenerating ? 2 : 1,
+                      : _isListening
+                          ? const Color(0xFF007AFF).withValues(alpha: 0.35)
+                          : Colors.grey.withValues(alpha: 0.12),
+                  width: (_isGenerating || _isListening) ? 2 : 1,
                 ),
                 boxShadow: [
                   BoxShadow(
@@ -449,12 +664,16 @@ class _HomePageState extends State<HomePage> {
               child: TextField(
                 controller: _textController,
                 focusNode: _focusNode,
-                enabled: !_isGenerating,
+                enabled: !_isGenerating && !_isListening,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _generate(),
                 style: const TextStyle(fontSize: 16),
                 decoration: InputDecoration(
-                  hintText: _isListening ? '正在聆听...' : '打字或按住说话...',
+                  hintText: _isListening
+                      ? '正在聆听...'
+                      : _isGenerating
+                          ? '正在生成中...'
+                          : '打字或按住麦克风说话...',
                   hintStyle: TextStyle(
                     color: _isListening
                         ? const Color(0xFF007AFF)
@@ -470,8 +689,7 @@ class _HomePageState extends State<HomePage> {
                       ? IconButton(
                           icon: const Icon(Icons.send_rounded, size: 22),
                           color: const Color(0xFF007AFF),
-                          onPressed:
-                              _isGenerating ? null : _generate,
+                          onPressed: _isGenerating ? null : _generate,
                         )
                       : null,
                 ),
@@ -479,36 +697,52 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(width: 10),
-          // Mic button
-          GestureDetector(
-            onLongPressStart: (_) => _startListening(),
-            onLongPressEnd: (_) => _stopListening(),
-            onTap: _speechAvailable ? _startListening : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: _isListening
-                    ? Colors.red
-                    : _speechAvailable
-                        ? const Color(0xFF007AFF)
-                        : Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(26),
-                boxShadow: _isListening
-                    ? [
-                        BoxShadow(
-                          color: Colors.red.withValues(alpha: 0.3),
-                          blurRadius: 16,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Icon(
-                _isListening ? Icons.mic : Icons.mic_none,
-                color: Colors.white,
-                size: 24,
+          // Voice button — long press to talk
+          Material(
+            color: Colors.transparent,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: _isGenerating
+                  ? null
+                  : (_) => _startListening(),
+              onTapUp: _isGenerating
+                  ? null
+                  : (_) {
+                      if (_isListening) {
+                        _speech.stop();
+                        setState(() => _isListening = false);
+                        // If text was captured, auto-submit
+                        if (_textController.text.trim().isNotEmpty) {
+                          _generate();
+                        }
+                      }
+                    },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: _isListening
+                      ? Colors.red
+                      : _speechInitialized
+                          ? const Color(0xFF007AFF)
+                          : Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(26),
+                  boxShadow: _isListening
+                      ? [
+                          BoxShadow(
+                            color: Colors.red.withValues(alpha: 0.4),
+                            blurRadius: 20,
+                            spreadRadius: 3,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
             ),
           ),

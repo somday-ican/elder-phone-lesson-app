@@ -39,6 +39,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
         NavigationDelegate(
           onPageFinished: (_) {
             setState(() => _pageLoaded = true);
+            _syncWebStep();
           },
         ),
       )
@@ -50,38 +51,101 @@ class _UIPracticePageState extends State<UIPracticePage> {
   }
 
   String _wrapHtml(String original) {
-    // Inject click handling that correctly detects target buttons
-    // and prevents false wrong-click events.
+    // Inject step control so Flutter, not model-generated HTML, owns progress.
+    // Generated pages only need onclick="onTargetClick(N)" targets.
     final injectedScript = '''
+<style>
+html,body{width:100%!important;max-width:100%!important;overflow-x:hidden!important;}
+body{margin:0!important;-webkit-text-size-adjust:100%!important;}
+.phone{width:min(375px,100vw)!important;max-width:100vw!important;margin-left:auto!important;margin-right:auto!important;}
+[data-practice-target]{transition:opacity .18s ease,filter .18s ease,transform .18s ease;}
+[data-practice-target][data-step-inactive="true"]{opacity:.32!important;filter:grayscale(.25)!important;animation:none!important;}
+[data-practice-target][data-step-active="true"]{outline:3px solid rgba(0,122,255,.35)!important;outline-offset:2px!important;}
+</style>
 <script>
 (function(){
-  // Guard: prevent duplicate events from the same tap
   var _lastTargetClick = 0;
+  var _activeStep = 1;
+  var _targets = [];
 
-  // Find whether this element (or any parent) is a target button.
-  // Uses getAttribute because el.onclick is null for inline handlers
-  // on Android WebView.
-  function isTargetButton(el) {
+  function stepFromAttr(attr) {
+    if (!attr) return 0;
+    var match = String(attr).match(/onTargetClick\\s*\\(\\s*(\\d+)\\s*\\)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  function collectTargets() {
+    _targets = Array.prototype.slice.call(document.querySelectorAll('[onclick]'))
+      .map(function(el) {
+        var step = stepFromAttr(el.getAttribute('onclick'));
+        if (!step) return null;
+        el.setAttribute('data-practice-target', 'true');
+        el.setAttribute('data-practice-step', String(step));
+        return { el: el, step: step };
+      })
+      .filter(Boolean);
+    applyStep();
+  }
+
+  function applyStep() {
+    _targets.forEach(function(item) {
+      var active = item.step === _activeStep;
+      item.el.setAttribute('data-step-active', active ? 'true' : 'false');
+      item.el.setAttribute('data-step-inactive', active ? 'false' : 'true');
+      item.el.setAttribute('aria-disabled', active ? 'false' : 'true');
+    });
+    var activeTarget = _targets.filter(function(item){ return item.step === _activeStep; })[0];
+    if (activeTarget && activeTarget.el.scrollIntoView) {
+      activeTarget.el.scrollIntoView({block:'center', inline:'nearest', behavior:'smooth'});
+    }
+  }
+
+  window.__setPracticeStep = function(step) {
+    _activeStep = Number(step) || 1;
+    if (!_targets.length) collectTargets();
+    applyStep();
+  };
+
+  window.onTargetClick = function(step) {
+    var now = Date.now();
+    if (now - _lastTargetClick < 250) return;
+    _lastTargetClick = now;
+    if (window.TargetBridge) {
+      window.TargetBridge.postMessage(JSON.stringify({event:'target_click',stepIndex:Number(step) || 0}));
+    }
+  };
+
+  function targetInfo(el) {
     while (el && el !== document.body) {
-      var attr = el.getAttribute && el.getAttribute('onclick');
-      if (attr && attr.indexOf('onTargetClick') !== -1) return true;
+      if (el.getAttribute) {
+        var step = Number(el.getAttribute('data-practice-step')) || stepFromAttr(el.getAttribute('onclick'));
+        if (step) return { el: el, step: step };
+      }
       el = el.parentElement;
     }
-    return false;
+    return null;
   }
 
   document.addEventListener('click', function(e) {
-    if (isTargetButton(e.target)) {
-      _lastTargetClick = Date.now();
-      return; // Target button — its own onclick will fire
+    var info = targetInfo(e.target);
+    if (info) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.onTargetClick(info.step);
+      return;
     }
-    // Only fire wrong_click if no target was clicked recently (debounce)
     if (Date.now() - _lastTargetClick > 300) {
       if (window.TargetBridge) {
         window.TargetBridge.postMessage(JSON.stringify({event: "wrong_click"}));
       }
     }
-  }, true); // use capture phase so we run before the target handler
+  }, true);
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', collectTargets);
+  } else {
+    collectTargets();
+  }
 })();
 </script>
 </body>''';
@@ -92,6 +156,15 @@ class _UIPracticePageState extends State<UIPracticePage> {
           '<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"></head>',
         )
         .replaceFirst('</body>', injectedScript);
+  }
+
+  Future<void> _syncWebStep() async {
+    if (!_pageLoaded) return;
+    try {
+      await _controller.runJavaScript('window.__setPracticeStep($_currentStep);');
+    } catch (_) {
+      // WebView may still be settling; the injected script also initializes itself.
+    }
   }
 
   void _handleJsMessage(JavaScriptMessage message) {
@@ -135,6 +208,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
               _feedbackText = null;
               _feedbackColor = null;
             });
+            _syncWebStep();
           }
         });
       }

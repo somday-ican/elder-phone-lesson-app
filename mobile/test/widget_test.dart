@@ -8,6 +8,6 @@ void main() {
     await tester.pumpWidget(const VideoToLessonApp());
 
     expect(find.text('学手机'), findsOneWidget);
-    expect(find.text('告诉我想学什么'), findsOneWidget);
+    expect(find.text('告诉我你想学什么'), findsOneWidget);
   });
 }
