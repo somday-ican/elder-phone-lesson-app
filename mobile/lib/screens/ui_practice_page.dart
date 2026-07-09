@@ -315,116 +315,80 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF9F8F6),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF9F8F6),
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        title: Text(
-          widget.title,
-          style: const TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.w800,
-            fontSize: 22,
-          ),
-        ),
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new,
-            color: Colors.black,
-            size: 22,
-          ),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _MiniChip(
-                  icon: Icons.check,
-                  value: _correctCount,
-                  color: Colors.green,
-                ),
-                const SizedBox(width: 6),
-                _MiniChip(
-                  icon: Icons.close,
-                  value: _wrongCount,
-                  color: Colors.red,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          // AbsorbPointer: when feedback panel is visible, block ALL touches
-          // from reaching the WebView. This prevents click-through that causes
-          // a spurious wrong_click flash when tapping "继续".
-          AbsorbPointer(
-            absorbing: _feedbackKind != null,
-            child: Column(
-              children: [
-                // Progress bar
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                  child: Row(
-                    children: [
-                      for (var i = 1; i <= widget.targetCount; i++)
-                        Expanded(
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            height: 4,
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(2),
-                              color: i < _currentStep
-                                  ? const Color(0xFF58CC02)
-                                  : i == _currentStep
-                                  ? const Color(0xFF1CB0F6)
-                                  : const Color(0xFFE5E5E5),
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            // AbsorbPointer: when feedback panel is visible, block ALL touches
+            // from reaching the WebView. This prevents click-through that causes
+            // a spurious wrong_click flash when tapping "继续".
+            AbsorbPointer(
+              absorbing: _feedbackKind != null,
+              child: Column(
+                children: [
+                  _PracticeProgressLine(
+                    currentStep: _currentStep,
+                    targetCount: widget.targetCount,
+                  ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Opacity(
+                          opacity: _pageLoaded ? 1.0 : 0.0,
+                          child: WebViewWidget(controller: _controller),
+                        ),
+                        if (!_pageLoaded)
+                          const Center(
+                            child: CircularProgressIndicator(
+                              color: Color(0xFF58CC02),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
-                // Step indicator
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 4,
-                  ),
-                  child: Text(
-                    '第 $_currentStep 步 / 共 ${widget.targetCount} 步',
-                    style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
-                  ),
-                ),
-                // Loading spinner while page loads
-                if (!_pageLoaded)
-                  const Expanded(
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFF58CC02),
-                      ),
+                      ],
                     ),
                   ),
-                // WebView
-                Expanded(
-                  child: Opacity(
-                    opacity: _pageLoaded ? 1.0 : 0.0,
-                    child: WebViewWidget(controller: _controller),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ), // AbsorbPointer
-          _DuolingoFeedbackPanel(
-            kind: _feedbackKind,
-            onContinue: _continueAfterCorrect,
-            onDismissWrong: _dismissWrongFeedback,
-          ),
+            _DuolingoFeedbackPanel(
+              kind: _feedbackKind,
+              onContinue: _continueAfterCorrect,
+              onDismissWrong: _dismissWrongFeedback,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PracticeProgressLine extends StatelessWidget {
+  const _PracticeProgressLine({
+    required this.currentStep,
+    required this.targetCount,
+  });
+
+  final int currentStep;
+  final int targetCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 5,
+      child: Row(
+        children: [
+          for (var i = 1; i <= targetCount; i++)
+            Expanded(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                height: 5,
+                color: i < currentStep
+                    ? const Color(0xFF58CC02)
+                    : i == currentStep
+                    ? const Color(0xFF1CB0F6)
+                    : const Color(0xFFE5E5E5),
+              ),
+            ),
         ],
       ),
     );
@@ -635,43 +599,6 @@ class _BouncyFeedbackButtonState extends State<_BouncyFeedbackButton> {
         ),
         alignment: Alignment.center,
         child: widget.child,
-      ),
-    );
-  }
-}
-
-class _MiniChip extends StatelessWidget {
-  const _MiniChip({
-    required this.icon,
-    required this.value,
-    required this.color,
-  });
-  final IconData icon;
-  final int value;
-  final MaterialColor color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(width: 3),
-          Text(
-            '$value',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-            ),
-          ),
-        ],
       ),
     );
   }

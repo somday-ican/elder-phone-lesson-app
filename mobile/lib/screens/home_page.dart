@@ -10,6 +10,7 @@ import 'package:record/record.dart';
 import '../data/card_repository.dart';
 import '../generation/model_client.dart';
 import '../models/skill_card.dart';
+import 'achievement_page.dart';
 import 'ui_practice_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -116,10 +117,16 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _screenshotToCard() async {
     if (_isGenerating || _isListening) return;
-    // Pick images first (limit 3 for proxy stability)
+    // Pick screenshots first; seven reference steps should work comfortably.
     final picker = ImagePicker();
     final files = await picker.pickMultiImage(imageQuality: 50);
     if (files.isEmpty) return;
+    final selectedFiles = files.take(8).toList();
+    if (files.length > selectedFiles.length && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('最多会使用前 8 张截图生成教程')));
+    }
     if (!mounted) return;
 
     // Ask for goal
@@ -166,12 +173,12 @@ class _HomePageState extends State<HomePage>
 
     try {
       final base64s = <String>[];
-      for (final f in files) {
+      for (final f in selectedFiles) {
         final bytes = await File(f.path).readAsBytes();
-        // Aggressively compress for proxy stability (270px, JPEG Q50)
+        // Keep enough UI detail while staying small enough for mobile upload.
         final decoded = img.decodeImage(bytes);
         if (decoded != null) {
-          const maxW = 270;
+          const maxW = 520;
           final resized = decoded.width > maxW
               ? img.copyResize(
                   decoded,
@@ -179,7 +186,7 @@ class _HomePageState extends State<HomePage>
                   height: (decoded.height * maxW / decoded.width).round(),
                 )
               : decoded;
-          final compressed = img.encodeJpg(resized, quality: 50);
+          final compressed = img.encodeJpg(resized, quality: 62);
           base64s.add('data:image/jpeg;base64,${base64Encode(compressed)}');
         } else {
           base64s.add('data:image/jpeg;base64,${base64Encode(bytes)}');
@@ -220,41 +227,105 @@ class _HomePageState extends State<HomePage>
   Future<void> _startVoice() async {
     if (_isListening || _isGenerating) return;
     if (!await _recorder.hasPermission()) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要麦克风权限'), behavior: SnackBarBehavior.floating));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('需要麦克风权限'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
       return;
     }
     setState(() => _isListening = true);
     try {
       final filePath = '${Directory.systemTemp.path}/voice_input.m4a';
       final aacOk = await _recorder.isEncoderSupported(AudioEncoder.aacLc);
-      await _recorder.start(RecordConfig(encoder: aacOk ? AudioEncoder.aacLc : AudioEncoder.aacHe, sampleRate: 16000, numChannels: 1, bitRate: aacOk ? 64000 : 32000), path: filePath);
+      await _recorder.start(
+        RecordConfig(
+          encoder: aacOk ? AudioEncoder.aacLc : AudioEncoder.aacHe,
+          sampleRate: 16000,
+          numChannels: 1,
+          bitRate: aacOk ? 64000 : 32000,
+        ),
+        path: filePath,
+      );
       await Future.delayed(const Duration(milliseconds: 500));
-      if (!mounted) { await _recorder.stop(); return; }
-      final shouldStop = await showDialog<bool>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Row(children: [Icon(Icons.mic, color: Colors.red, size: 28), SizedBox(width: 10), Text('正在聆听...', style: TextStyle(fontWeight: FontWeight.w800))]),
-        content: const Text('请说出你想学的操作，说完后点击"完成"', style: TextStyle(fontSize: 20)),
-        actions: [FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF6B35)), child: const Text('完成'))],
-      ));
+      if (!mounted) {
+        await _recorder.stop();
+        return;
+      }
+      final shouldStop = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.mic, color: Colors.red, size: 28),
+              SizedBox(width: 10),
+              Text('正在聆听...', style: TextStyle(fontWeight: FontWeight.w800)),
+            ],
+          ),
+          content: const Text(
+            '请说出你想学的操作，说完后点击"完成"',
+            style: TextStyle(fontSize: 20),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFF6B35),
+              ),
+              child: const Text('完成'),
+            ),
+          ],
+        ),
+      );
       final actualPath = await _recorder.stop();
       setState(() => _isListening = false);
       if (shouldStop != true || !mounted) return;
       final audioFile = File(actualPath ?? filePath);
-      if (!await audioFile.exists()) { _showSnack('录音文件未生成'); return; }
+      if (!await audioFile.exists()) {
+        _showSnack('录音文件未生成');
+        return;
+      }
       final bytes = await audioFile.readAsBytes();
-      if (bytes.length < 400) { _showSnack('录音太短，请说完整句话'); audioFile.delete().ignore(); return; }
-      final text = await widget.modelClient.transcribeAudio(audioBase64: base64Encode(bytes));
+      if (bytes.length < 400) {
+        _showSnack('录音太短，请说完整句话');
+        audioFile.delete().ignore();
+        return;
+      }
+      final text = await widget.modelClient.transcribeAudio(
+        audioBase64: base64Encode(bytes),
+      );
       audioFile.delete().ignore();
-      if (!mounted || text.isEmpty) { _showSnack('未识别到语音，请说清楚一点再试'); return; }
+      if (!mounted || text.isEmpty) {
+        _showSnack('未识别到语音，请说清楚一点再试');
+        return;
+      }
       _textController.text = text;
       await Future.delayed(const Duration(milliseconds: 400));
       if (mounted) _generate();
-    } catch (e) { if (mounted) { setState(() => _isListening = false); _showSnack('录音失败：$e'); } }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isListening = false);
+        _showSnack('录音失败：$e');
+      }
+    }
   }
 
   void _showSnack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(fontSize: 18)), behavior: SnackBarBehavior.floating, backgroundColor: Colors.red.shade700));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 18)),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.red.shade700,
+      ),
+    );
   }
 
   void _openCard(SkillCard card) {
@@ -368,12 +439,12 @@ class _HomePageState extends State<HomePage>
 
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+          padding: const EdgeInsets.fromLTRB(24, 14, 24, 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF007AFF).withValues(alpha: 0.05),
+            color: const Color(0xFFFFEBDD),
             border: Border(
               bottom: BorderSide(
-                color: const Color(0xFF007AFF).withValues(alpha: 0.1),
+                color: const Color(0xFFFF6B35).withValues(alpha: 0.18),
               ),
             ),
           ),
@@ -388,7 +459,7 @@ class _HomePageState extends State<HomePage>
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       valueColor: AlwaysStoppedAnimation(
-                        const Color(0xFF007AFF).withValues(alpha: 0.7),
+                        const Color(0xFFFF6B35).withValues(alpha: 0.86),
                       ),
                     ),
                   ),
@@ -396,8 +467,8 @@ class _HomePageState extends State<HomePage>
                   Text(
                     'AI 正在生成教程',
                     style: TextStyle(
-                      color: const Color(0xFF007AFF).withValues(alpha: 0.85),
-                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF003366).withValues(alpha: 0.90),
+                      fontWeight: FontWeight.w800,
                       fontSize: 14,
                     ),
                   ),
@@ -405,9 +476,9 @@ class _HomePageState extends State<HomePage>
                   Text(
                     timeStr,
                     style: TextStyle(
-                      color: const Color(0xFF007AFF).withValues(alpha: 0.5),
+                      color: const Color(0xFF003366).withValues(alpha: 0.58),
                       fontSize: 13,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w700,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -419,7 +490,7 @@ class _HomePageState extends State<HomePage>
                 child: Container(
                   height: 4,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF007AFF).withValues(alpha: 0.08),
+                    color: Colors.white.withValues(alpha: 0.70),
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Row(
@@ -433,16 +504,16 @@ class _HomePageState extends State<HomePage>
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              const Color(0xFF007AFF),
-                              const Color(0xFF007AFF).withValues(alpha: 0.7),
+                              const Color(0xFFFF6B35),
+                              const Color(0xFFFFA15F),
                             ],
                           ),
                           borderRadius: BorderRadius.circular(3),
                           boxShadow: [
                             BoxShadow(
                               color: const Color(
-                                0xFF007AFF,
-                              ).withValues(alpha: 0.3),
+                                0xFFFF6B35,
+                              ).withValues(alpha: 0.32),
                               blurRadius: 6,
                               offset: const Offset(0, 1),
                             ),
@@ -460,8 +531,8 @@ class _HomePageState extends State<HomePage>
                   '${(progress * 100).round()}%',
                   style: TextStyle(
                     fontSize: 11,
-                    color: const Color(0xFF007AFF).withValues(alpha: 0.4),
-                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF003366).withValues(alpha: 0.45),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -595,13 +666,6 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 14),
-                TextButton.icon(
-                  onPressed: () =>
-                      Navigator.of(context).pushNamed('/screenshot'),
-                  icon: const Icon(Icons.collections_outlined),
-                  label: const Text('打开图片教程生成器'),
                 ),
               ],
             ),
@@ -750,7 +814,14 @@ class _BottomNavBar extends StatelessWidget {
             label: '成就',
             active: false,
             onTap: () {
-              Navigator.of(context).pushNamed('/achievements');
+              Navigator.of(context).push(
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      const AchievementPage(),
+                  transitionDuration: Duration.zero,
+                  reverseTransitionDuration: Duration.zero,
+                ),
+              );
             },
           ),
           _NavItem(

@@ -2,10 +2,12 @@ import { readJsonBody } from "../../http/readJsonBody.js";
 import { sendJson } from "../../http/sendJson.js";
 import { buildChatGeneratePrompt } from "./promptBuilder.js";
 
-const MAX_REQUEST_BYTES = 500000; // increased for screenshot base64 payloads
+const MAX_REQUEST_BYTES = 8000000;
 const MAX_GOAL_LENGTH = 200;
 const MAX_STEP_COUNT = 8;
 const MIN_STEP_COUNT = 3;
+const MAX_SCREENSHOT_COUNT = 8;
+const MAX_SCREENSHOT_DATA_URL_LENGTH = 900000;
 
 export async function chatGenerateController(req, res, config) {
   const body = await readJsonBody(req, MAX_REQUEST_BYTES);
@@ -34,7 +36,8 @@ export async function chatGenerateController(req, res, config) {
     return;
   }
 
-  // Remote LLM call — no images, just text prompt
+  // Remote LLM call. Optional screenshots are passed as image parts so the
+  // model can imitate the user's reference flow and visual style.
   try {
     const prompt = buildChatGeneratePrompt({ goal, stepCount, customScreenshots });
 
@@ -87,8 +90,10 @@ export async function chatGenerateController(req, res, config) {
 function validateScreenshots(screenshots) {
   if (!Array.isArray(screenshots)) return [];
   return screenshots.filter(s =>
-    typeof s === "string" && s.match(/^data:image\/(png|jpeg|jpg|webp);base64,/i) && s.length < 50000
-  ).slice(0, 10);
+    typeof s === "string" &&
+    s.match(/^data:image\/(png|jpeg|jpg|webp);base64,/i) &&
+    s.length <= MAX_SCREENSHOT_DATA_URL_LENGTH
+  ).slice(0, MAX_SCREENSHOT_COUNT);
 }
 
 function validateRequest(body) {
