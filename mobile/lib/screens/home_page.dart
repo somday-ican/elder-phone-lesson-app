@@ -120,9 +120,10 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _screenshotToCard() async {
-    // Pick images first
+    if (_isGenerating || _isListening) return;
+    // Pick images first (limit 3 for proxy stability)
     final picker = ImagePicker();
-    final files = await picker.pickMultiImage(imageQuality: 80);
+    final files = await picker.pickMultiImage(imageQuality: 50);
     if (files.isEmpty) return;
 
     // Ask for goal
@@ -161,15 +162,15 @@ class _HomePageState extends State<HomePage>
       final base64s = <String>[];
       for (final f in files) {
         final bytes = await File(f.path).readAsBytes();
-        // Compress: resize to max 540px wide, JPEG quality 60
+        // Aggressively compress for proxy stability (270px, JPEG Q50)
         final decoded = img.decodeImage(bytes);
         if (decoded != null) {
-          const maxW = 540;
+          const maxW = 270;
           final resized = decoded.width > maxW
               ? img.copyResize(decoded, width: maxW,
                   height: (decoded.height * maxW / decoded.width).round())
               : decoded;
-          final compressed = img.encodeJpg(resized, quality: 60);
+          final compressed = img.encodeJpg(resized, quality: 50);
           base64s.add('data:image/jpeg;base64,${base64Encode(compressed)}');
         } else {
           base64s.add('data:image/jpeg;base64,${base64Encode(bytes)}');

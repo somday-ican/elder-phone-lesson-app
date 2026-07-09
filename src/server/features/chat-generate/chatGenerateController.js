@@ -87,8 +87,8 @@ export async function chatGenerateController(req, res, config) {
 function validateScreenshots(screenshots) {
   if (!Array.isArray(screenshots)) return [];
   return screenshots.filter(s =>
-    typeof s === "string" && s.match(/^data:image\/(png|jpeg|jpg|webp);base64,/)
-  ).slice(0, 6);
+    typeof s === "string" && s.match(/^data:image\/(png|jpeg|jpg|webp);base64,/i) && s.length < 50000
+  ).slice(0, 10);
 }
 
 function validateRequest(body) {
