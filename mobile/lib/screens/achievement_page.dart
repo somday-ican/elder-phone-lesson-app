@@ -59,7 +59,6 @@ class _AchievementPageState extends State<AchievementPage> {
           children: [
             Column(
               children: [
-                const _FakeStatusBar(),
                 _TopToolbar(onSettings: () {}, onNotifications: () {}),
                 Expanded(
                   child: ListView(
@@ -101,50 +100,6 @@ class _AchievementPageState extends State<AchievementPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _FakeStatusBar extends StatelessWidget {
-  const _FakeStatusBar();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(24, 16, 24, 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            '10:30',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-              color: Colors.black,
-            ),
-          ),
-          Row(
-            children: [
-              Icon(
-                Icons.signal_cellular_4_bar_rounded,
-                size: 24,
-                color: Colors.black,
-              ),
-              SizedBox(width: 8),
-              Icon(Icons.wifi_rounded, size: 24, color: Colors.black),
-              SizedBox(width: 8),
-              RotatedBox(
-                quarterTurns: 1,
-                child: Icon(
-                  Icons.battery_full_rounded,
-                  size: 24,
-                  color: Colors.black,
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
