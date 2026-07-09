@@ -33,7 +33,7 @@ class FrameStage extends StatefulWidget {
 }
 
 class _FrameStageState extends State<FrameStage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   TapFeedback _feedback = TapFeedback.none;
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
