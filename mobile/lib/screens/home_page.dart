@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:record/record.dart';
 
 import '../data/card_repository.dart';
 import '../generation/model_client.dart';
@@ -30,8 +30,7 @@ class _HomePageState extends State<HomePage>
     with SingleTickerProviderStateMixin {
   final _textController = TextEditingController();
   final _focusNode = FocusNode();
-  late stt.SpeechToText _speech;
-  bool _speechInitialized = false;
+  final AudioRecorder _recorder = AudioRecorder();
   bool _isListening = false;
   bool _isGenerating = false;
   List<SkillCard> _cards = [];
@@ -55,30 +54,7 @@ class _HomePageState extends State<HomePage>
       TweenSequenceItem(tween: Tween(begin: 0.45, end: 0.75), weight: 3),
       TweenSequenceItem(tween: Tween(begin: 0.75, end: 0.90), weight: 4),
     ]).animate(_progressCtrl);
-    _initSpeech();
     _loadCards();
-  }
-
-  Future<void> _initSpeech() async {
-    _speech = stt.SpeechToText();
-    try {
-      final available = await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-          if (status == 'listening') {
-            if (mounted) setState(() => _isListening = true);
-          }
-        },
-        onError: (_) {
-          if (mounted) setState(() => _isListening = false);
-        },
-      );
-      if (mounted) setState(() => _speechInitialized = available);
-    } catch (_) {
-      if (mounted) setState(() => _speechInitialized = false);
-    }
   }
 
   Future<void> _loadCards() async {
@@ -229,26 +205,16 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _toggleVoice() async {
-    // If already listening, stop and submit
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-      if (_textController.text.trim().isNotEmpty) {
-        _generate();
-      }
-      return;
-    }
+  Future<void> _startVoice() async {
+    if (_isListening || _isGenerating) return;
 
-    // Not yet listening — start
-    if (!_speechInitialized) {
-      await _initSpeech();
-    }
-    if (!_speechInitialized) {
+    // Check permission first
+    final hasPermission = await _recorder.hasPermission();
+    if (!hasPermission) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('语音功能未就绪，请检查麦克风权限'),
+            content: Text('需要麦克风权限才能使用语音输入'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -256,66 +222,85 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // Show listening UI immediately for responsiveness
+    // Start recording
     setState(() => _isListening = true);
-
     try {
-      // Try system default locale first (more compatible across Chinese phones)
-      await _speech.listen(
-        onResult: (result) {
-          if (!mounted) return;
-          _textController.text = result.recognizedWords;
-          if (result.finalResult) {
-            setState(() => _isListening = false);
-          }
-        },
-        partialResults: true,
+      final filePath = '${Directory.systemTemp.path}/voice_input.m4a';
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 24000),
+        path: filePath,
       );
-      // listen() returned without exception — check if platform actually started
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (mounted && !_speech.isListening) {
-        // Platform accepted but didn't start — speech unavailable
-        setState(() => _isListening = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('语音识别不可用，请用文字输入'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
+
+      // Wait a bit to let the recorder start properly
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Show dialog to stop recording
+      if (!mounted) return;
+      final shouldStop = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.mic, color: Colors.red, size: 28),
+              SizedBox(width: 10),
+              Text('正在聆听...'),
+            ],
           ),
-        );
-      }
-    } catch (_) {
-      // Try Chinese locale fallback
-      try {
-        await _speech.listen(
-          onResult: (result) {
-            if (!mounted) return;
-            _textController.text = result.recognizedWords;
-            if (result.finalResult) {
-              setState(() => _isListening = false);
-            }
-          },
-          // ignore: deprecated_member_use
-          localeId: 'zh_CN',
-          partialResults: true,
-        );
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted && !_speech.isListening) {
-          setState(() => _isListening = false);
-        }
-      } catch (err) {
+          content: const Text('请说出你想学的操作，说完后点击"完成"'),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('完成'),
+            ),
+          ],
+        ),
+      );
+      await _recorder.stop();
+      setState(() => _isListening = false);
+
+      if (shouldStop != true || !mounted) return;
+
+      // Read and send to server
+      final audioFile = File(filePath);
+      if (!await audioFile.exists()) return;
+
+      final bytes = await audioFile.readAsBytes();
+      final base64Audio = base64Encode(bytes);
+      final result = await widget.modelClient.transcribeAudio(
+        audioBase64: base64Audio,
+      );
+
+      if (!mounted || result.isEmpty) {
         if (mounted) {
-          setState(() => _isListening = false);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('语音识别未就绪，请用文字输入'),
+              content: Text('未识别到语音，请重试'),
               behavior: SnackBarBehavior.floating,
             ),
           );
         }
+        return;
+      }
+
+      _textController.text = result;
+      await Future.delayed(const Duration(milliseconds: 400));
+      if (mounted) _generate();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isListening = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('录音失败：$e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
+
+  // Voice input handled by _startVoice() above — uses native Android RecognizerIntent
 
   void _openCard(SkillCard card) {
     widget.cardRepository.incrementPractice(card.id);
@@ -363,7 +348,7 @@ class _HomePageState extends State<HomePage>
     _focusNode.dispose();
     _generatingTimer?.cancel();
     _progressCtrl.dispose();
-    _speech.stop();
+    // Voice is system dialog — no cleanup needed
     super.dispose();
   }
 
@@ -807,16 +792,14 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           const SizedBox(width: 10),
-          // Voice button — tap to start, tap again to stop
+          // Voice button — one tap to start system voice dialog
           IconButton(
-            onPressed: _isGenerating ? null : _toggleVoice,
+            onPressed: _isGenerating || _isListening ? null : _startVoice,
             icon: const Icon(Icons.mic, size: 24),
             style: IconButton.styleFrom(
               backgroundColor: _isListening
                   ? Colors.red
-                  : _speechInitialized
-                      ? const Color(0xFF007AFF)
-                      : Colors.grey.shade300,
+                  : const Color(0xFF007AFF),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.all(14),
               shape: RoundedRectangleBorder(

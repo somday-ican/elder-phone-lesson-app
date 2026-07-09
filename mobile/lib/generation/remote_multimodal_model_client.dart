@@ -328,4 +328,34 @@ class RemoteMultimodalModelClient implements ModelClient {
       client.close(force: true);
     }
   }
+
+  @override
+  Future<String> transcribeAudio({
+    required String audioBase64,
+  }) async {
+    final url = Uri.parse('${endpoint.origin}/api/transcribe');
+    final client = HttpClient()..connectionTimeout = timeout;
+
+    try {
+      final request = await client.postUrl(url).timeout(timeout);
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'audio': 'data:audio/m4a;base64,$audioBase64',
+      }));
+
+      final response = await request.close().timeout(timeout);
+      final body = await utf8.decoder.bind(response).join().timeout(timeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'Transcription API returned ${response.statusCode}: $body',
+          uri: url,
+        );
+      }
+
+      final payload = jsonDecode(body) as Map<String, Object?>;
+      return payload['text'] as String? ?? '';
+    } finally {
+      client.close(force: true);
+    }
+  }
 }

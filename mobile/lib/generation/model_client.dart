@@ -45,4 +45,8 @@ abstract class ModelClient {
     int stepCount = 5,
     List<String>? screenshotBase64s,
   });
+
+  Future<String> transcribeAudio({
+    required String audioBase64,
+  });
 }

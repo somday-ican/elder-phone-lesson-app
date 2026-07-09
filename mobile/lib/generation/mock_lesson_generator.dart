@@ -300,6 +300,11 @@ ${buttons.toString()}
     );
   }
 
+  @override
+  Future<String> transcribeAudio({required String audioBase64}) async {
+    return '语音识别测试文字';
+  }
+
   String _escapeHtml(String s) {
     return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   }
