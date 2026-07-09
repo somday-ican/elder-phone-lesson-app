@@ -12,19 +12,41 @@ function getAllReferenceImages() {
   if (_refCache) return _refCache;
   _refCache = [];
   try {
-    for (const f of readdirSync(REF_DIR).filter(x => x.endsWith('.txt')))
+    for (const f of readdirSync(REF_DIR).filter(isReferenceFile).sort())
       try {
-        const b64 = readFileSync(join(REF_DIR, f), "utf8").trim();
+        const ref = parseReferenceFile(f);
+        const b64 = ref.textEncoded
+          ? readFileSync(join(REF_DIR, f), "utf8").trim()
+          : readFileSync(join(REF_DIR, f)).toString("base64");
         if (b64) {
           _refCache.push({
-            name: f.replace('.txt',''),
+            name: ref.name,
             app: f.split('-')[0],
+            mime: ref.mime,
             b64
           });
         }
       } catch (_) {}
   } catch (_) {}
   return _refCache;
+}
+
+function isReferenceFile(filename) {
+  return /\.(txt|jpe?g|png|webp)$/i.test(filename);
+}
+
+function parseReferenceFile(filename) {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".txt")) {
+    return { name: filename.replace(/\.txt$/i, ""), mime: "image/jpeg", textEncoded: true };
+  }
+  if (lower.endsWith(".png")) {
+    return { name: filename.replace(/\.png$/i, ""), mime: "image/png", textEncoded: false };
+  }
+  if (lower.endsWith(".webp")) {
+    return { name: filename.replace(/\.webp$/i, ""), mime: "image/webp", textEncoded: false };
+  }
+  return { name: filename.replace(/\.jpe?g$/i, ""), mime: "image/jpeg", textEncoded: false };
 }
 
 function getReferenceImagesForApp(app) {
@@ -36,7 +58,14 @@ function getReferenceImagesForApp(app) {
 function describeReference(ref) {
   const labels = {
     "wechat-chat-list": "WeChat chat list reference: top nav, search row, conversation cells, 44-48px avatars, timestamps, unread badges, thin dividers, bottom tab bar.",
-    "wechat-discover": "WeChat Discover reference: white grouped list rows, green icons, compact spacing, thin dividers, bottom tab bar."
+    "wechat-discover": "WeChat Discover reference: white grouped list rows, green icons, compact spacing, thin dividers, bottom tab bar.",
+    "wechat-step1-chat-list-to-discover": "Step 1 reference: WeChat chat list / main WeChat tab. Target is the bottom Discover tab.",
+    "wechat-step2-discover-to-moments": "Step 2 reference: WeChat Discover page. Target is the Moments row.",
+    "wechat-step3-moments-feed-camera": "Step 3 reference: WeChat Moments feed/profile feed. Target is the top-right camera publish button.",
+    "wechat-step4-moments-action-sheet": "Step 4 reference: Moments publish action sheet. Target is '从手机相册选择'.",
+    "wechat-step5-album-grid-select": "Step 5 reference: WeChat album picker grid. Target is selecting the first image thumbnail.",
+    "wechat-step6-album-grid-done": "Step 6 reference: WeChat album picker with one selected item. Target is the bottom-right green '完成(1)' button.",
+    "wechat-step7-moments-compose-publish": "Step 7 reference: Moments compose page with selected image. Target is adding text then tapping the top-right green '发表' button."
   };
   return labels[ref.name] || `${ref.name} visual reference: match spacing, typography, colors, tab bar and real app density.`;
 }
@@ -131,7 +160,7 @@ export function buildChatGeneratePrompt({ goal, stepCount, customScreenshots }) 
     userContent.push({ type: "text", text: `=== BUILT-IN ${app.toUpperCase()} REFERENCE SCREENSHOTS ===\nStudy these images for visual style. Recreate similar UI patterns in HTML; do not mention the references to the user.` });
     for (const ref of refs) {
       userContent.push({ type: "text", text: describeReference(ref) });
-      userContent.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${ref.b64}` } });
+      userContent.push({ type: "image_url", image_url: { url: `data:${ref.mime};base64,${ref.b64}` } });
     }
   }
 
