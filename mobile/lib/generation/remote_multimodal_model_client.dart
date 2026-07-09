@@ -340,7 +340,7 @@ class RemoteMultimodalModelClient implements ModelClient {
       final request = await client.postUrl(url).timeout(timeout);
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode({
-        'audio': 'data:audio/m4a;base64,$audioBase64',
+        'audio': 'data:audio/wav;base64,$audioBase64',
       }));
 
       final response = await request.close().timeout(timeout);

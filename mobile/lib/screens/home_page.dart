@@ -226,16 +226,20 @@ class _HomePageState extends State<HomePage>
     setState(() => _isListening = true);
     try {
       final filePath = '${Directory.systemTemp.path}/voice_input.m4a';
+      // WAV has broadest Android device support. aacLc is often unavailable on Chinese phones.
       await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 24000),
+        const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1, bitRate: 64000),
         path: filePath,
       );
 
-      // Wait a bit to let the recorder start properly
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Short delay to ensure the recorder actually started
+      await Future.delayed(const Duration(milliseconds: 500));
 
       // Show dialog to stop recording
-      if (!mounted) return;
+      if (!mounted) {
+        await _recorder.stop();
+        return;
+      }
       final shouldStop = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -257,26 +261,52 @@ class _HomePageState extends State<HomePage>
           ],
         ),
       );
-      await _recorder.stop();
+
+      // stop() returns the ACTUAL output path (platform may change extension)
+      final actualPath = await _recorder.stop();
       setState(() => _isListening = false);
 
       if (shouldStop != true || !mounted) return;
 
-      // Read and send to server
-      final audioFile = File(filePath);
-      if (!await audioFile.exists()) return;
+      // Read from the actual path (stop() returns reliable path)
+      final audioFile = File(actualPath ?? filePath);
+      if (!await audioFile.exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('录音文件未生成，请重试'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
 
       final bytes = await audioFile.readAsBytes();
+      if (bytes.length < 400) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('录音太短（${bytes.length}字节），请说完整句话'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        audioFile.delete().ignore();
+        return;
+      }
       final base64Audio = base64Encode(bytes);
+
       final result = await widget.modelClient.transcribeAudio(
         audioBase64: base64Audio,
       );
+      audioFile.delete().ignore();
 
       if (!mounted || result.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('未识别到语音，请重试'),
+              content: Text('未识别到语音，请说清楚一点再试'),
               behavior: SnackBarBehavior.floating,
             ),
           );
