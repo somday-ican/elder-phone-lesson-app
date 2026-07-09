@@ -86,6 +86,10 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
     if (window.TargetBridge) {
       window.TargetBridge.postMessage(JSON.stringify({event:'target_click',stepIndex:Number(step)||1}));
     }
+    // Call the AI-generated handler to switch HTML pages
+    if (window._aiOnTargetClick) {
+      try { window._aiOnTargetClick(step); } catch(e) {}
+    }
   };
 
   // Track which target buttons exist
@@ -221,11 +225,6 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
 
   Future<void> _continueAfterCorrect() async {
     final completed = _currentStep >= widget.targetCount;
-    try {
-      await _controller.runJavaScript(
-        'if(window._aiOnTargetClick){window._aiOnTargetClick($_currentStep);}',
-      );
-    } catch (_) {}
 
     if (!mounted) return;
     setState(() {
@@ -343,9 +342,14 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
       ),
       body: Stack(
         children: [
-          Column(
-            children: [
-              // Progress bar
+          // AbsorbPointer: when feedback panel is visible, block ALL touches
+          // from reaching the WebView. This prevents click-through that causes
+          // a spurious wrong_click flash when tapping "继续".
+          AbsorbPointer(
+            absorbing: _feedbackKind != null,
+            child: Column(
+              children: [
+                // Progress bar
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
                 child: Row(
@@ -395,7 +399,8 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
                 ),
               ),
             ],
-          ),
+            ),
+            ), // AbsorbPointer
           _DuolingoFeedbackPanel(
             kind: _feedbackKind,
             onContinue: _continueAfterCorrect,
@@ -435,37 +440,41 @@ class _DuolingoFeedbackPanel extends StatelessWidget {
     final title = correct ? '真厉害！' : '不正确';
     final buttonText = correct ? '继续' : '知道了';
 
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: IgnorePointer(
-        ignoring: !visible,
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 360),
-          curve: Curves.easeOutCubic,
-          offset: visible ? Offset.zero : const Offset(0, 1.05),
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 220),
-            opacity: visible ? 1 : 0,
-            child: Container(
-              width: double.infinity,
-              padding: EdgeInsets.fromLTRB(
-                20,
-                22,
-                20,
-                MediaQuery.of(context).padding.bottom + 18,
-              ),
-              decoration: BoxDecoration(
-                color: bgColor,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 18,
-                    offset: const Offset(0, -8),
-                  ),
-                ],
-              ),
+    // When visible, GestureDetector with HitTestBehavior.opaque physically
+    // blocks ALL touch events from reaching the WebView's platform view layer.
+    // IgnorePointer/AbsorbPointer are ineffective against Android WebView.
+    return Positioned.fill(
+      left: 0, top: 0, right: 0, bottom: 0,
+      child: GestureDetector(
+        behavior: visible ? HitTestBehavior.opaque : HitTestBehavior.translucent,
+        onTap: visible ? () {} : null,
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: AnimatedSlide(
+            duration: const Duration(milliseconds: 360),
+            curve: Curves.easeOutCubic,
+            offset: visible ? Offset.zero : const Offset(0, 1.05),
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 220),
+              opacity: visible ? 1 : 0,
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  22,
+                  20,
+                  MediaQuery.of(context).padding.bottom + 18,
+                ),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 18,
+                      offset: const Offset(0, -8),
+                    ),
+                  ],
+                ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -548,10 +557,11 @@ class _DuolingoFeedbackPanel extends StatelessWidget {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
+          ), // AnimatedOpacity
+        ), // AnimatedSlide
+        ), // Align
+      ), // GestureDetector
+    ); // Positioned
   }
 }
 
