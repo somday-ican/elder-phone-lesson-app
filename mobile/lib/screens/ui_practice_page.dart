@@ -27,6 +27,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
   String? _feedbackText;
   Color? _feedbackColor;
   bool _pageLoaded = false;
+  bool _processingTap = false;
 
   @override
   void initState() {
@@ -49,24 +50,38 @@ class _UIPracticePageState extends State<UIPracticePage> {
   }
 
   String _wrapHtml(String original) {
-    // Inject global click detection: any click NOT on a target button = wrong
-    final wrongClickScript = '''
+    // Inject click handling that correctly detects target buttons
+    // and prevents false wrong-click events.
+    final injectedScript = '''
 <script>
 (function(){
-  document.addEventListener('click', function(e){
-    // Check if click was on a target button
-    var el = e.target;
-    while (el) {
-      if (el.onclick && el.onclick.toString().indexOf('onTargetClick') !== -1) {
-        return; // Target button — let it handle
-      }
+  // Guard: prevent duplicate events from the same tap
+  var _lastTargetClick = 0;
+
+  // Find whether this element (or any parent) is a target button.
+  // Uses getAttribute because el.onclick is null for inline handlers
+  // on Android WebView.
+  function isTargetButton(el) {
+    while (el && el !== document.body) {
+      var attr = el.getAttribute && el.getAttribute('onclick');
+      if (attr && attr.indexOf('onTargetClick') !== -1) return true;
       el = el.parentElement;
     }
-    // Not a target button — report wrong click
-    if (window.TargetBridge) {
-      window.TargetBridge.postMessage(JSON.stringify({event: "wrong_click"}));
+    return false;
+  }
+
+  document.addEventListener('click', function(e) {
+    if (isTargetButton(e.target)) {
+      _lastTargetClick = Date.now();
+      return; // Target button — its own onclick will fire
     }
-  });
+    // Only fire wrong_click if no target was clicked recently (debounce)
+    if (Date.now() - _lastTargetClick > 300) {
+      if (window.TargetBridge) {
+        window.TargetBridge.postMessage(JSON.stringify({event: "wrong_click"}));
+      }
+    }
+  }, true); // use capture phase so we run before the target handler
 })();
 </script>
 </body>''';
@@ -76,7 +91,7 @@ class _UIPracticePageState extends State<UIPracticePage> {
           '</head>',
           '<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"></head>',
         )
-        .replaceFirst('</body>', wrongClickScript);
+        .replaceFirst('</body>', injectedScript);
   }
 
   void _handleJsMessage(JavaScriptMessage message) {
@@ -95,6 +110,10 @@ class _UIPracticePageState extends State<UIPracticePage> {
   }
 
   void _onTargetClick(int step) {
+    // Guard: ignore taps while processing (prevents double-tap skip)
+    if (_processingTap) return;
+    _processingTap = true;
+
     if (step == _currentStep) {
       setState(() {
         _correctCount++;
@@ -103,9 +122,13 @@ class _UIPracticePageState extends State<UIPracticePage> {
       });
 
       if (_currentStep >= widget.targetCount) {
-        Future.delayed(const Duration(seconds: 1), _showCompletion);
+        Future.delayed(const Duration(seconds: 1), () {
+          _processingTap = false;
+          _showCompletion();
+        });
       } else {
         Future.delayed(const Duration(milliseconds: 800), () {
+          _processingTap = false;
           if (mounted) {
             setState(() {
               _currentStep++;
@@ -116,11 +139,16 @@ class _UIPracticePageState extends State<UIPracticePage> {
         });
       }
     } else {
+      _processingTap = false;
       _onWrongClick();
     }
   }
 
   void _onWrongClick() {
+    // Skip wrong-click feedback if we just got a correct answer
+    // (prevents concurrent correct+wrong feedback from JS race)
+    if (_feedbackText != null && _feedbackColor == Colors.green) return;
+
     setState(() {
       _wrongCount++;
       _feedbackText = '✗ 点错了，请找到正确的按钮再试一次';
