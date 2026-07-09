@@ -51,7 +51,7 @@ export async function generateUIController(req, res, config) {
       },
       body: JSON.stringify({
         model: config.aiModelName,
-        temperature: 0.2,
+        temperature: 0.3,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: prompt.system },

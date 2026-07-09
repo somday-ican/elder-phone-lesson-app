@@ -181,9 +181,13 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
     });
 
     try {
+      // Only send first 3 images to speed up generation
+      final selected = _images.take(3).toList();
       final result = await widget.modelClient.generateUI(
-        frames: _images,
-        markedPositions: _images.asMap().entries.map((e) => (x: 0.5, y: 0.5)).toList(),
+        frames: selected,
+        markedPositions: selected.asMap().entries
+            .map((e) => (x: 0.5, y: 0.5))
+            .toList(),
         goal: _goalController.text.trim(),
       );
       if (result == null || !mounted) {
