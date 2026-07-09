@@ -22,6 +22,8 @@ export async function transcribeController(req, res, config) {
     return;
   }
 
+  const audioType = match[1];
+  const extension = audioType === "x-wav" ? "wav" : audioType;
   const base64Data = match[2];
   const audioBytes = Buffer.from(base64Data, "base64");
   if (audioBytes.length < 200) {
@@ -35,7 +37,7 @@ export async function transcribeController(req, res, config) {
   }
 
   const uuid = randomUUID();
-  const tmpPath = join(tmpdir(), `voice_${uuid}.wav`);
+  const tmpPath = join(tmpdir(), `voice_${uuid}.${extension}`);
   const txtPath = join(tmpdir(), `voice_${uuid}.txt`);
 
   try {
