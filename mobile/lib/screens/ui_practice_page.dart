@@ -51,8 +51,9 @@ class _UIPracticePageState extends State<UIPracticePage> {
   }
 
   String _wrapHtml(String original) {
-    // Inject step control so Flutter, not model-generated HTML, owns progress.
-    // Generated pages only need onclick="onTargetClick(N)" targets.
+    // Inject CSS + click handler. The AI-generated HTML already has its own
+    // onTargetClick() that handles page switching. We wrap it to add Flutter
+    // bridge messaging and step validation — never overwrite it.
     final injectedScript = '''
 <style>
 html,body{width:100%!important;max-width:100%!important;overflow-x:hidden!important;}
@@ -64,79 +65,49 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
 </style>
 <script>
 (function(){
-  var _lastTargetClick = 0;
-  var _activeStep = 1;
-  var _targets = [];
+  var _lastClick = 0;
 
-  function stepFromAttr(attr) {
-    if (!attr) return 0;
-    var match = String(attr).match(/onTargetClick\\s*\\(\\s*(\\d+)\\s*\\)/);
-    return match ? parseInt(match[1], 10) : 0;
+  // Wrap the AI-generated onTargetClick (which handles page switching)
+  // with Flutter bridge messaging. Never overwrite it.
+  var _aiHandler = window.onTargetClick;
+  if (typeof _aiHandler === 'function') {
+    window._aiOnTargetClick = _aiHandler;
   }
-
-  function collectTargets() {
-    _targets = Array.prototype.slice.call(document.querySelectorAll('[onclick]'))
-      .map(function(el) {
-        var step = stepFromAttr(el.getAttribute('onclick'));
-        if (!step) return null;
-        el.setAttribute('data-practice-target', 'true');
-        el.setAttribute('data-practice-step', String(step));
-        return { el: el, step: step };
-      })
-      .filter(Boolean);
-    applyStep();
-  }
-
-  function applyStep() {
-    _targets.forEach(function(item) {
-      var active = item.step === _activeStep;
-      item.el.setAttribute('data-step-active', active ? 'true' : 'false');
-      item.el.setAttribute('data-step-inactive', active ? 'false' : 'true');
-      item.el.setAttribute('aria-disabled', active ? 'false' : 'true');
-    });
-    var activeTarget = _targets.filter(function(item){ return item.step === _activeStep; })[0];
-    if (activeTarget && activeTarget.el.scrollIntoView) {
-      activeTarget.el.scrollIntoView({block:'center', inline:'nearest', behavior:'smooth'});
-    }
-  }
-
-  window.__setPracticeStep = function(step) {
-    _activeStep = Number(step) || 1;
-    if (!_targets.length) collectTargets();
-    applyStep();
-  };
-
   window.onTargetClick = function(step) {
     var now = Date.now();
-    if (now - _lastTargetClick < 250) return;
-    _lastTargetClick = now;
+    if (now - _lastClick < 300) return;
+    _lastClick = now;
+    // Notify Flutter
     if (window.TargetBridge) {
-      window.TargetBridge.postMessage(JSON.stringify({event:'target_click',stepIndex:Number(step) || 0}));
+      window.TargetBridge.postMessage(JSON.stringify({event:'target_click',stepIndex:Number(step)||1}));
+    }
+    // Call the AI's original handler for page switching
+    if (window._aiOnTargetClick) {
+      try { window._aiOnTargetClick(step); } catch(e) {}
     }
   };
 
-  function targetInfo(el) {
-    while (el && el !== document.body) {
-      if (el.getAttribute) {
-        var step = Number(el.getAttribute('data-practice-step')) || stepFromAttr(el.getAttribute('onclick'));
-        if (step) return { el: el, step: step };
-      }
-      el = el.parentElement;
-    }
-    return null;
+  // Track which target buttons exist
+  function collectTargets() {
+    var all = document.querySelectorAll('[onclick*="onTargetClick"]');
+    all.forEach(function(el, i) {
+      el.setAttribute('data-practice-target', 'true');
+      el.setAttribute('data-practice-step', String(i + 1));
+    });
   }
 
+  // Click handler: detect clicks on non-target areas
   document.addEventListener('click', function(e) {
-    var info = targetInfo(e.target);
-    if (info) {
-      e.preventDefault();
-      e.stopPropagation();
-      window.onTargetClick(info.step);
-      return;
+    var el = e.target;
+    var isTarget = false;
+    while (el && el !== document.body) {
+      var oc = (el.getAttribute && el.getAttribute('onclick')) || '';
+      if (oc.indexOf('onTargetClick') !== -1) { isTarget = true; break; }
+      el = el.parentElement;
     }
-    if (Date.now() - _lastTargetClick > 300) {
+    if (!isTarget && Date.now() - _lastClick > 400) {
       if (window.TargetBridge) {
-        window.TargetBridge.postMessage(JSON.stringify({event: "wrong_click"}));
+        window.TargetBridge.postMessage(JSON.stringify({event:'wrong_click'}));
       }
     }
   }, true);
