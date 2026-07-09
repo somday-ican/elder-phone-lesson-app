@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'generation/lesson_validator.dart';
 import 'generation/mock_lesson_generator.dart';
 import 'generation/model_client.dart';
+import 'models/ui_description.dart';
 import 'generation/prompt_builder.dart';
 import 'generation/remote_multimodal_model_client.dart';
 import 'models/button_analysis.dart';
@@ -435,6 +436,7 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
 
     setState(() {
       _isGenerating = true;
+      _showPathPicker = false;
       _status = 'AI 正在生成仿真界面...';
     });
 
@@ -443,7 +445,19 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
           .map((f) => (x: f.touchTarget!.x, y: f.touchTarget!.y))
           .toList();
 
-      final uiPage = await widget.modelClient.generateUI(
+      UIPage? uiPage;
+      try {
+        uiPage = await widget.modelClient.generateUI(
+          frames: _images,
+          markedPositions: positions,
+          goal: _goalController.text.trim(),
+        );
+      } catch (_) {
+        // API failed — use mock fallback below
+      }
+
+      // Fallback: use mock if remote failed
+      uiPage ??= await const MockLessonGenerator().generateUI(
         frames: _images,
         markedPositions: positions,
         goal: _goalController.text.trim(),
@@ -452,28 +466,24 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
       if (uiPage != null && mounted) {
         setState(() {
           _isGenerating = false;
-          _showPathPicker = false;
         });
 
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => UIPracticePage(
-              page: uiPage,
+              page: uiPage!,
               targetCount: framesWithTargets.length,
             ),
           ),
         );
-      } else {
-        setState(() {
-          _isGenerating = false;
-          _status = 'UI 生成失败，请使用图片模式';
-        });
       }
     } catch (error) {
-      setState(() {
-        _isGenerating = false;
-        _status = 'UI 生成失败：$error，请使用图片模式';
-      });
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+          _status = 'UI 生成失败，请用图片模式';
+        });
+      }
     }
   }
 
@@ -1355,7 +1365,10 @@ class _PathCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return GestureDetector(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+      borderRadius: BorderRadius.circular(16),
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -1424,6 +1437,7 @@ class _PathCard extends StatelessWidget {
             Text(subtitle, style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.3)),
           ],
         ),
+      ),
       ),
     );
   }
