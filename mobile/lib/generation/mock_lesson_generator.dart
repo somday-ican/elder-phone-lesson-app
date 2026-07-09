@@ -235,6 +235,75 @@ function onTargetClick(step) {
   }
 
   @override
+  Future<ChatGenerationResult> chatGenerate({
+    required String goal,
+    int stepCount = 5,
+  }) async {
+    final steps = <({int stepIndex, String instruction, String elderTip})>[];
+    final buttons = StringBuffer();
+    for (var i = 0; i < stepCount; i++) {
+      steps.add((
+        stepIndex: i + 1,
+        instruction: '请点击「步骤 ${i + 1}」按钮',
+        elderTip: '慢慢来，不着急',
+      ));
+      buttons.writeln('''
+        <button onclick="onTargetClick(${i + 1})" class="target"
+                style="background:#007AFF;color:#fff;border:none;padding:14px 28px;
+                       border-radius:12px;font-size:17px;font-weight:600;margin:8px 0;
+                       cursor:pointer;width:100%;max-width:280px;animation:pulse 1.5s infinite;">
+          步骤 ${i + 1}
+        </button>''');
+    }
+
+    final html = '''<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     background:#e5e5e5;display:flex;justify-content:center;align-items:center;
+     min-height:100vh;padding:16px}
+.phone{width:375px;background:#F2F2F7;border-radius:36px;overflow:hidden;
+       box-shadow:0 20px 60px rgba(0,0,0,0.3),0 0 0 2px #1a1a1a;min-height:680px}
+.status-bar{height:44px;background:#fff;display:flex;align-items:center;
+            justify-content:space-between;padding:0 24px;font-size:13px;font-weight:600;color:#1c1c1e}
+.nav-bar{height:52px;background:#fff;display:flex;align-items:center;
+         justify-content:center;padding:0 16px;border-bottom:1px solid #e5e5ea;
+         font-size:18px;font-weight:700;color:#1c1c1e}
+.content{padding:28px 20px;display:flex;flex-direction:column;align-items:center}
+h2{font-size:23px;font-weight:800;color:#1c1c1e;margin-bottom:6px;text-align:center}
+p.sub{font-size:15px;color:#8e8e93;margin-bottom:20px;text-align:center;line-height:1.5}
+@keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(0,122,255,0.4)}
+                  50%{transform:scale(1.04);box-shadow:0 0 0 14px rgba(0,122,255,0)}}
+.target{box-shadow:0 4px 14px rgba(0,0,0,0.12);transition:transform 0.15s}
+.target:active{transform:scale(0.94)!important}
+</style></head>
+<body><div class="phone">
+<div class="status-bar"><span>9:41</span><span>📶 🔋</span></div>
+<div class="nav-bar">📚 ${_escapeHtml(goal)}</div>
+<div class="content">
+<h2>操作教程</h2>
+<p class="sub">请按照数字顺序<br>依次点击下方按钮</p>
+${buttons.toString()}
+</div>
+</div>
+<script>function onTargetClick(n){if(window.TargetBridge)window.TargetBridge.postMessage(JSON.stringify({event:"target_click",stepIndex:n}))}</script>
+</body></html>''';
+
+    return ChatGenerationResult(
+      html: html,
+      title: goal,
+      steps: steps,
+    );
+  }
+
+  String _escapeHtml(String s) {
+    return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  }
+
+  @override
   Future<ButtonAnalysis?> analyzeButton({
     required VideoFrame frame,
     required double markedX,

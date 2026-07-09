@@ -272,4 +272,55 @@ class RemoteMultimodalModelClient implements ModelClient {
       client.close(force: true);
     }
   }
+
+  @override
+  Future<ChatGenerationResult> chatGenerate({
+    required String goal,
+    int stepCount = 5,
+  }) async {
+    final url = Uri.parse('${endpoint.origin}/api/chat-generate');
+    final client = HttpClient()..connectionTimeout = timeout;
+
+    try {
+      final request = await client.postUrl(url).timeout(timeout);
+      request.headers.contentType = ContentType.json;
+      request.write(
+        jsonEncode({
+          'goal': goal,
+          'stepCount': stepCount,
+        }),
+      );
+
+      final response = await request.close().timeout(timeout);
+      final body = await utf8.decoder.bind(response).join().timeout(timeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'Chat generate API returned ${response.statusCode}: $body',
+          uri: url,
+        );
+      }
+
+      final payload = jsonDecode(body) as Map<String, Object?>;
+
+      final stepsJson = (payload['steps'] as List?)
+          ?.map((s) {
+            final m = (s as Map).cast<String, Object?>();
+            return (
+              stepIndex: (m['stepIndex'] as num?)?.toInt() ?? 0,
+              instruction: m['instruction'] as String? ?? '',
+              elderTip: m['elderTip'] as String? ?? '',
+            );
+          })
+          .toList() ??
+          [];
+
+      return ChatGenerationResult(
+        html: payload['html'] as String? ?? '',
+        title: payload['title'] as String? ?? goal,
+        steps: stepsJson,
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
 }

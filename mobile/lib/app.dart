@@ -11,6 +11,7 @@ import 'generation/prompt_builder.dart';
 import 'generation/remote_multimodal_model_client.dart';
 import 'models/lesson.dart';
 import 'models/video_frame.dart';
+import 'screens/home_page.dart';
 import 'screens/ui_practice_page.dart';
 import 'widgets/frame_stage.dart';
 
@@ -19,6 +20,7 @@ class VideoToLessonApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final modelClient = _buildModelClient();
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: '长辈学手机',
@@ -27,10 +29,15 @@ class VideoToLessonApp extends StatelessWidget {
           seedColor: const Color(0xFF007AFF),
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFF7F8FA),
+        scaffoldBackgroundColor: const Color(0xFFF2F2F7),
         useMaterial3: true,
       ),
-      home: ScreenshotLessonPage(modelClient: _buildModelClient()),
+      initialRoute: '/',
+      routes: {
+        '/': (_) => HomePage(modelClient: modelClient),
+        '/screenshot': (_) =>
+            ScreenshotLessonPage(modelClient: modelClient),
+      },
     );
   }
 
