@@ -13,6 +13,7 @@ class FrameStage extends StatefulWidget {
     required this.aspectRatio,
     this.target,
     this.processedButton,
+    this.buttonLabel,
     this.onTapRelative,
     this.interactive = false,
     this.hitRadius = 0.20,
@@ -23,6 +24,7 @@ class FrameStage extends StatefulWidget {
   final double aspectRatio;
   final RelativeTarget? target;
   final ProcessedButton? processedButton;
+  final String? buttonLabel;
   final ValueChanged<Offset>? onTapRelative;
   final bool interactive;
   final double hitRadius;
@@ -95,21 +97,15 @@ class _FrameStageState extends State<FrameStage>
 
     if (hit) {
       _pulseController.stop();
-      setState(() {
-        _feedback = TapFeedback.correct;
-      });
+      setState(() => _feedback = TapFeedback.correct);
       widget.onPracticeResult?.call(true);
     } else {
-      setState(() {
-        _feedback = TapFeedback.wrong;
-      });
+      setState(() => _feedback = TapFeedback.wrong);
       _shakeController.forward(from: 0);
       widget.onPracticeResult?.call(false);
       Future.delayed(const Duration(milliseconds: 600), () {
         if (mounted && _feedback == TapFeedback.wrong) {
-          setState(() {
-            _feedback = TapFeedback.none;
-          });
+          setState(() => _feedback = TapFeedback.none);
         }
       });
     }
@@ -124,12 +120,8 @@ class _FrameStageState extends State<FrameStage>
 
   void resetFeedback() {
     if (mounted) {
-      setState(() {
-        _feedback = TapFeedback.none;
-      });
-      if (widget.interactive) {
-        _pulseController.repeat();
-      }
+      setState(() => _feedback = TapFeedback.none);
+      if (widget.interactive) _pulseController.repeat();
     }
   }
 
@@ -137,6 +129,8 @@ class _FrameStageState extends State<FrameStage>
   Widget build(BuildContext context) {
     final safeAspectRatio =
         widget.aspectRatio > 0 ? widget.aspectRatio : 9 / 16;
+    final darkOverlay =
+        widget.interactive && _feedback == TapFeedback.none;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -144,49 +138,38 @@ class _FrameStageState extends State<FrameStage>
         aspectRatio: safeAspectRatio,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final darkOverlay =
-                widget.interactive && _feedback == TapFeedback.none;
-
             final child = Stack(
               fit: StackFit.expand,
               children: [
-                // Base image
+                // Base screenshot
                 Image.memory(widget.frame.bytes, fit: BoxFit.cover),
 
-                // Dim the background in practice mode to make target pop
+                // Dim background in practice mode
                 if (darkOverlay)
-                  Container(color: Colors.black.withValues(alpha: 0.15)),
+                  Container(color: Colors.black.withValues(alpha: 0.20)),
 
-                // Target overlay
+                // Target highlight
                 if (widget.target != null)
                   widget.processedButton != null
-                      ? _BlurredButtonOverlay(
+                      ? _ButtonCutoutOverlay(
                           target: widget.target!,
                           processedButton: widget.processedButton!,
+                          label: widget.buttonLabel,
                           feedback: _feedback,
                           pulseAnimation:
                               darkOverlay ? _pulseAnimation : null,
                         )
-                      : _TargetOverlay(
+                      : _SimpleHighlightOverlay(
                           target: widget.target!,
+                          label: widget.buttonLabel,
                           feedback: _feedback,
+                          pulseAnimation:
+                              darkOverlay ? _pulseAnimation : null,
                         ),
 
                 // Correct feedback
                 if (_feedback == TapFeedback.correct)
                   const _CorrectOverlay(),
-
-                // Wrong flash
-                if (_feedback == TapFeedback.wrong)
-                  Positioned.fill(
-                    child: AnimatedOpacity(
-                      opacity: 0.0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Container(
-                        color: Colors.red.withValues(alpha: 0.08),
-                      ),
-                    ),
-                  ),
               ],
             );
 
@@ -217,19 +200,21 @@ class _FrameStageState extends State<FrameStage>
   }
 }
 
-// ── Blurred button overlay (macOS frosted-glass style) ──────────
+// ── Button cutout overlay (shows actual button cropped from screenshot) ──
 
-class _BlurredButtonOverlay extends StatelessWidget {
-  const _BlurredButtonOverlay({
+class _ButtonCutoutOverlay extends StatelessWidget {
+  const _ButtonCutoutOverlay({
     required this.target,
     required this.processedButton,
     required this.feedback,
+    this.label,
     this.pulseAnimation,
   });
 
   final RelativeTarget target;
   final ProcessedButton processedButton;
   final TapFeedback feedback;
+  final String? label;
   final Animation<double>? pulseAnimation;
 
   @override
@@ -238,11 +223,9 @@ class _BlurredButtonOverlay extends StatelessWidget {
       builder: (context, constraints) {
         final imgW = processedButton.displayWidth;
         final imgH = processedButton.displayHeight;
-        // Scale the display to fit within the container while keeping
-        // the enlarged button centered on the target
         final scaleX = constraints.maxWidth / imgW;
         final scaleY = constraints.maxHeight / imgH;
-        final scale = (scaleX < scaleY ? scaleX : scaleY) * 0.85;
+        final scale = (scaleX < scaleY ? scaleX : scaleY) * 0.78;
 
         final displayW = imgW * scale;
         final displayH = imgH * scale;
@@ -251,32 +234,30 @@ class _BlurredButtonOverlay extends StatelessWidget {
 
         final isCorrect = feedback == TapFeedback.correct;
 
-        Widget overlay = AnimatedContainer(
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOutCubic,
+        Widget overlay = Container(
           width: displayW.clamp(0, constraints.maxWidth),
           height: displayH.clamp(0, constraints.maxHeight),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
                 color: isCorrect
-                    ? Colors.green.withValues(alpha: 0.45)
-                    : Colors.white.withValues(alpha: 0.25),
-                blurRadius: isCorrect ? 28 : 20,
-                spreadRadius: isCorrect ? 4 : 0,
+                    ? Colors.green.withValues(alpha: 0.5)
+                    : const Color(0xFF007AFF).withValues(alpha: 0.40),
+                blurRadius: isCorrect ? 30 : 24,
+                spreadRadius: isCorrect ? 6 : 2,
               ),
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.18),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(18),
             child: RawImage(
-              image: processedButton.blurredImage,
+              image: processedButton.buttonImage,
               fit: BoxFit.fill,
               width: displayW,
               height: displayH,
@@ -284,14 +265,13 @@ class _BlurredButtonOverlay extends StatelessWidget {
           ),
         );
 
-        // Pulse animation for practice mode
         if (pulseAnimation != null && !isCorrect) {
           overlay = AnimatedBuilder(
             animation: pulseAnimation!,
             builder: (context, child) {
               final pulse = pulseAnimation!.value;
               return Transform.scale(
-                scale: 1.0 + pulse * 0.04,
+                scale: 1.0 + pulse * 0.06,
                 child: child,
               );
             },
@@ -302,15 +282,16 @@ class _BlurredButtonOverlay extends StatelessWidget {
         return Stack(
           children: [
             Positioned(
-              left: left.clamp(0, constraints.maxWidth - displayW).toDouble(),
-              top: top.clamp(0, constraints.maxHeight - displayH).toDouble(),
+              left: left.clamp(0, constraints.maxWidth - displayW),
+              top: top.clamp(0, constraints.maxHeight - displayH),
               child: overlay,
             ),
-            // Arrow hint below the button
+            // Arrow hint
             if (pulseAnimation != null && !isCorrect)
               Positioned(
-                left: target.x * constraints.maxWidth - 15,
-                top: (top + displayH + 4).clamp(0, constraints.maxHeight - 32),
+                left: target.x * constraints.maxWidth - 16,
+                top: (top + displayH + 4)
+                    .clamp(0, constraints.maxHeight - 30),
                 child: AnimatedBuilder(
                   animation: pulseAnimation!,
                   builder: (context, child) {
@@ -320,10 +301,33 @@ class _BlurredButtonOverlay extends StatelessWidget {
                     );
                   },
                   child: const Icon(
-                    Icons.keyboard_arrow_up,
+                    Icons.keyboard_arrow_up_rounded,
                     color: Colors.white,
-                    size: 32,
-                    shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                    size: 34,
+                    shadows: [
+                      Shadow(color: Colors.black54, blurRadius: 8),
+                    ],
+                  ),
+                ),
+              ),
+            // Label below
+            if (label != null && label!.isNotEmpty && pulseAnimation != null)
+              Positioned(
+                left: (target.x * constraints.maxWidth - 60)
+                    .clamp(0, constraints.maxWidth - 120),
+                top: (top + displayH + 32)
+                    .clamp(0, constraints.maxHeight - 24),
+                width: 120,
+                child: Text(
+                  label!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    shadows: [
+                      Shadow(color: Colors.black54, blurRadius: 6),
+                    ],
                   ),
                 ),
               ),
@@ -334,118 +338,133 @@ class _BlurredButtonOverlay extends StatelessWidget {
   }
 }
 
-// ── Fallback target overlay (simple colored box) ─────────────────
+// ── Simple highlight overlay (fallback when no cutout image) ──
 
-class _TargetOverlay extends StatefulWidget {
-  const _TargetOverlay({
+class _SimpleHighlightOverlay extends StatefulWidget {
+  const _SimpleHighlightOverlay({
     required this.target,
-    this.feedback = TapFeedback.none,
+    required this.feedback,
+    this.label,
+    this.pulseAnimation,
   });
 
   final RelativeTarget target;
   final TapFeedback feedback;
+  final String? label;
+  final Animation<double>? pulseAnimation;
 
   @override
-  State<_TargetOverlay> createState() => _TargetOverlayState();
+  State<_SimpleHighlightOverlay> createState() =>
+      _SimpleHighlightOverlayState();
 }
 
-class _TargetOverlayState extends State<_TargetOverlay>
+class _SimpleHighlightOverlayState extends State<_SimpleHighlightOverlay>
     with SingleTickerProviderStateMixin {
-  late AnimationController _glowController;
-  late Animation<double> _glowAnimation;
+  late AnimationController _glowCtrl;
 
   @override
   void initState() {
     super.initState();
-    _glowController = AnimationController(
+    _glowCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
-    );
-    _glowAnimation = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.6, end: 1.0), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.6), weight: 1),
-    ]).animate(_glowController);
-    _glowController.repeat();
+    )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
-    _glowController.dispose();
+    _glowCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final width = widget.target.width ?? 0.24;
-    final height = widget.target.height ?? 0.16;
+    final target = widget.target;
+    final width = target.width ?? 0.24;
+    final height = target.height ?? 0.16;
 
-    Color borderColor;
-    Color fillColor;
-    IconData icon;
-
-    switch (widget.feedback) {
-      case TapFeedback.correct:
-        borderColor = Colors.greenAccent;
-        fillColor = Colors.green.withValues(alpha: 0.22);
-        icon = Icons.check_circle;
-      case TapFeedback.wrong:
-        borderColor = Colors.redAccent;
-        fillColor = Colors.red.withValues(alpha: 0.14);
-        icon = Icons.touch_app;
-      case TapFeedback.none:
-        borderColor = Colors.white.withValues(alpha: 0.9);
-        fillColor = const Color(0xFF007AFF).withValues(alpha: 0.15);
-        icon = Icons.touch_app;
-    }
+    final isCorrect = widget.feedback == TapFeedback.correct;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final boxWidth = constraints.maxWidth * width;
-        final boxHeight = constraints.maxHeight * height;
-        final left = (widget.target.x * constraints.maxWidth) - boxWidth / 2;
+        final boxW = constraints.maxWidth * width;
+        final boxH = constraints.maxHeight * height;
+        final left =
+            (target.x * constraints.maxWidth) - boxW / 2;
         final top =
-            (widget.target.y * constraints.maxHeight) - boxHeight / 2;
+            (target.y * constraints.maxHeight) - boxH / 2;
 
         return AnimatedBuilder(
-          animation: _glowAnimation,
+          animation: _glowCtrl,
           builder: (context, child) {
+            final glow = _glowCtrl.value;
+            final borderColor = isCorrect
+                ? Colors.greenAccent
+                : const Color(0xFF007AFF);
+            final fillColor = isCorrect
+                ? Colors.green.withValues(alpha: 0.12)
+                : const Color(0xFF007AFF).withValues(alpha: 0.08);
+
             return Stack(
               children: [
                 Positioned(
-                  left: left
-                      .clamp(0, constraints.maxWidth - boxWidth)
-                      .toDouble(),
-                  top: top
-                      .clamp(0, constraints.maxHeight - boxHeight)
-                      .toDouble(),
-                  width: boxWidth,
-                  height: boxHeight,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 350),
-                    curve: Curves.easeOutCubic,
+                  left: left.clamp(0, constraints.maxWidth - boxW),
+                  top: top.clamp(0, constraints.maxHeight - boxH),
+                  width: boxW,
+                  height: boxH,
+                  child: Container(
                     decoration: BoxDecoration(
                       color: fillColor,
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: borderColor,
-                        width: widget.feedback == TapFeedback.none ? 2.5 : 3,
+                        color: borderColor.withValues(
+                          alpha: 0.5 + glow * 0.5,
+                        ),
+                        width: 2.5,
                       ),
-                      borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
                           color: borderColor.withValues(
-                            alpha: 0.3 * _glowAnimation.value,
+                            alpha: 0.2 + glow * 0.25,
                           ),
-                          blurRadius: 24,
-                          spreadRadius: 2,
+                          blurRadius: 20 + glow * 10,
+                          spreadRadius: 1 + glow * 3,
+                        ),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
                     child: Center(
-                      child: Icon(
-                        icon,
-                        color: Colors.white.withValues(alpha: 0.9),
-                        size: 32,
-                      ),
+                      child: widget.label != null &&
+                              widget.label!.isNotEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Text(
+                                widget.label!,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  shadows: const [
+                                    Shadow(
+                                      color: Colors.black54,
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.touch_app_rounded,
+                              color: Colors.white,
+                              size: 28,
+                            ),
                     ),
                   ),
                 ),
@@ -469,31 +488,23 @@ class _CorrectOverlay extends StatefulWidget {
 
 class _CorrectOverlayState extends State<_CorrectOverlay>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _fadeAnimation;
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+    _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
-    _scaleAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.elasticOut,
-    );
-    _fadeAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOut,
-    );
-    _controller.forward();
+    _scale = CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut);
+    _ctrl.forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
@@ -501,23 +512,24 @@ class _CorrectOverlayState extends State<_CorrectOverlay>
   Widget build(BuildContext context) {
     return Positioned.fill(
       child: AnimatedBuilder(
-        animation: _scaleAnimation,
+        animation: _scale,
         builder: (context, child) {
           return Opacity(
-            opacity: _fadeAnimation.value,
+            opacity: _scale.value.clamp(0, 1),
             child: Container(
-              color: Colors.black.withValues(alpha: 0.20),
+              color: Colors.black.withValues(alpha: 0.25),
               child: Center(
                 child: Transform.scale(
-                  scale: _scaleAnimation.value,
+                  scale: _scale.value,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 36,
-                      vertical: 24,
+                      horizontal: 32,
+                      vertical: 22,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1B5E20).withValues(alpha: 0.92),
-                      borderRadius: BorderRadius.circular(20),
+                      color: const Color(0xFF1B5E20)
+                          .withValues(alpha: 0.94),
+                      borderRadius: BorderRadius.circular(18),
                       boxShadow: const [
                         BoxShadow(
                           color: Color(0x4000C853),
@@ -532,16 +544,15 @@ class _CorrectOverlayState extends State<_CorrectOverlay>
                         Icon(
                           Icons.check_circle_rounded,
                           color: Color(0xFF69F0AE),
-                          size: 56,
+                          size: 52,
                         ),
-                        SizedBox(height: 10),
+                        SizedBox(height: 8),
                         Text(
                           '点对了！',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 22,
+                            fontSize: 21,
                             fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
                           ),
                         ),
                       ],

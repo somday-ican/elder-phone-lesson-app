@@ -273,14 +273,38 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
 
     setState(() {
       _isAnalyzing = true;
-      _status = 'AI 正在分析按钮位置和样式...';
+      _status = 'AI 正在分析按钮文字和样式...';
     });
 
-    try {
-      for (final frame in unanalyzed) {
-        setState(() => _status = 'AI 分析中（${frame.index + 1}/${_images.length}）...');
+    // Phase 1: Process button images from user-marked coords (no AI needed)
+    for (final frame in unanalyzed) {
+      final target = frame.touchTarget!;
+      try {
+        final processed = await widget.imageProcessor.extractButton(
+          sourceBytes: frame.bytes,
+          relX: target.x,
+          relY: target.y,
+          relWidth: target.width ?? 0.24,
+          relHeight: target.height ?? 0.16,
+          scale: 1.4,
+          glowColor: const Color(0xFF007AFF),
+        );
+        if (mounted) {
+          setState(() => _processedButtons[frame.index] = processed);
+        }
+      } catch (_) {
+        // Will fall back to simple highlight overlay
+      }
+    }
 
-        final target = frame.touchTarget!;
+    // Phase 2: AI analysis for labels and instructions
+    for (final frame in unanalyzed) {
+      if (!mounted) break;
+      setState(() =>
+          _status = 'AI 分析中（${frame.index + 1}/${_images.length}）...');
+
+      final target = frame.touchTarget!;
+      try {
         final analysis = await widget.modelClient.analyzeButton(
           frame: frame,
           markedX: target.x,
@@ -289,49 +313,22 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
         );
 
         if (analysis != null && mounted) {
-          // Update the frame's target with AI-refined bounding box
-          final updated = frame.copyWith(
-            touchTarget: analysis.boundingBox.toRelativeTarget(
-              label: analysis.label,
-            ),
-          );
-          setState(() {
-            _images = [
-              for (final f in _images)
-                if (f.index == frame.index) updated else f,
-            ];
-            _buttonAnalyses[frame.index] = analysis;
-          });
-
-          // Generate blurred button image
-          try {
-            final processed = await widget.imageProcessor.extractBlurredButton(
-              sourceBytes: frame.bytes,
-              boundingBox: analysis.boundingBox,
-              scale: 1.5,
-              blurRadius: 14,
-            );
-            if (mounted) {
-              setState(() => _processedButtons[frame.index] = processed);
-            }
-          } catch (_) {
-            // Image processing failed — fall back to simple overlay
-          }
+          setState(() => _buttonAnalyses[frame.index] = analysis);
         }
+      } catch (_) {
+        // AI failed — button image still works
       }
+    }
 
+    if (mounted) {
+      final withImage = _processedButtons.length;
+      final withAi = _buttonAnalyses.length;
       setState(() {
         _isAnalyzing = false;
         _showPathPicker = true;
-        final analyzed = _buttonAnalyses.length;
-        _status = analyzed > 0
-            ? 'AI 分析完成（$analyzed 张），已生成放大虚化按钮'
-            : 'AI 分析完成';
-      });
-    } catch (error) {
-      setState(() {
-        _isAnalyzing = false;
-        _status = 'AI 分析失败：$error，将使用标记位置练习';
+        _status = withImage > 0
+            ? '完成！已生成 $withImage 张按钮高亮（AI 分析 $withAi 张）'
+            : '完成，已标记 ${_framesWithTargets.length} 张';
       });
     }
   }
@@ -683,6 +680,7 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
                 selectedImage: selectedImage,
                 selectedIndex: _selectedImageIndex,
                 buttonAnalyses: _buttonAnalyses,
+                processedButtons: _processedButtons,
                 onSelectImage: _selectImage,
               ),
             ],
@@ -1085,6 +1083,7 @@ class _ScreenshotLessonPageState extends State<ScreenshotLessonPage> {
                   aspectRatio: 9 / 16,
                   target: target,
                   processedButton: processed,
+                  buttonLabel: analysis?.label,
                   interactive: true,
                   hitRadius: 0.20,
                   onPracticeResult: (correct) {
@@ -1436,6 +1435,7 @@ class _ImagePreviewPanel extends StatelessWidget {
     required this.selectedImage,
     required this.selectedIndex,
     required this.buttonAnalyses,
+    required this.processedButtons,
     required this.onSelectImage,
   });
 
@@ -1443,11 +1443,13 @@ class _ImagePreviewPanel extends StatelessWidget {
   final VideoFrame selectedImage;
   final int selectedIndex;
   final Map<int, ButtonAnalysis> buttonAnalyses;
+  final Map<int, ProcessedButton> processedButtons;
   final ValueChanged<int> onSelectImage;
 
   @override
   Widget build(BuildContext context) {
     final analysis = buttonAnalyses[selectedImage.index];
+    final processed = processedButtons[selectedImage.index];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1480,6 +1482,8 @@ class _ImagePreviewPanel extends StatelessWidget {
           frame: selectedImage,
           aspectRatio: 9 / 16,
           target: selectedImage.touchTarget,
+          processedButton: processed,
+          buttonLabel: analysis?.label,
         ),
         const SizedBox(height: 10),
         SizedBox(
