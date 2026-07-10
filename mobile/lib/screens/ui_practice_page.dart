@@ -31,9 +31,11 @@ class _UIPracticePageState extends State<UIPracticePage> {
   _PracticeFeedbackKind? _feedbackKind;
   bool _pageLoaded = false;
   bool _processingTap = false;
+  bool _blockFeedbackTouches = false;
   DateTime? _lastTargetClickAt;
   DateTime? _ignoreWrongClicksUntil;
   Timer? _pendingWrongFeedbackTimer;
+  Timer? _feedbackTouchBlockTimer;
 
   @override
   void initState() {
@@ -232,11 +234,18 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
 
   Future<void> _continueAfterCorrect() async {
     final completed = _currentStep >= widget.targetCount;
-    _suppressWebViewWrongClicks();
+    _suppressWebViewWrongClicks(const Duration(milliseconds: 1800));
+    _feedbackTouchBlockTimer?.cancel();
+    _feedbackTouchBlockTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) {
+        setState(() => _blockFeedbackTouches = false);
+      }
+    });
 
     if (!mounted) return;
     setState(() {
       _feedbackKind = null;
+      _blockFeedbackTouches = true;
       _processingTap = false;
       if (!completed) {
         _currentStep++;
@@ -251,17 +260,22 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
   }
 
   void _dismissWrongFeedback() {
-    _suppressWebViewWrongClicks();
+    _suppressWebViewWrongClicks(const Duration(milliseconds: 1200));
+    _feedbackTouchBlockTimer?.cancel();
+    _feedbackTouchBlockTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() => _blockFeedbackTouches = false);
+      }
+    });
     setState(() {
       _feedbackKind = null;
+      _blockFeedbackTouches = true;
       _processingTap = false;
     });
   }
 
-  void _suppressWebViewWrongClicks() {
-    _ignoreWrongClicksUntil = DateTime.now().add(
-      const Duration(milliseconds: 700),
-    );
+  void _suppressWebViewWrongClicks(Duration duration) {
+    _ignoreWrongClicksUntil = DateTime.now().add(duration);
     _pendingWrongFeedbackTimer?.cancel();
     _pendingWrongFeedbackTimer = null;
   }
@@ -269,6 +283,7 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
   @override
   void dispose() {
     _pendingWrongFeedbackTimer?.cancel();
+    _feedbackTouchBlockTimer?.cancel();
     super.dispose();
   }
 
@@ -323,7 +338,7 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
             // from reaching the WebView. This prevents click-through that causes
             // a spurious wrong_click flash when tapping "继续".
             AbsorbPointer(
-              absorbing: _feedbackKind != null,
+              absorbing: _feedbackKind != null || _blockFeedbackTouches,
               child: Column(
                 children: [
                   _PracticeProgressLine(
@@ -351,6 +366,7 @@ body{margin:0!important;-webkit-text-size-adjust:100%!important;}
             ),
             _DuolingoFeedbackPanel(
               kind: _feedbackKind,
+              blockTouches: _blockFeedbackTouches,
               onContinue: _continueAfterCorrect,
               onDismissWrong: _dismissWrongFeedback,
             ),
@@ -398,11 +414,13 @@ class _PracticeProgressLine extends StatelessWidget {
 class _DuolingoFeedbackPanel extends StatelessWidget {
   const _DuolingoFeedbackPanel({
     required this.kind,
+    required this.blockTouches,
     required this.onContinue,
     required this.onDismissWrong,
   });
 
   final _PracticeFeedbackKind? kind;
+  final bool blockTouches;
   final VoidCallback onContinue;
   final VoidCallback onDismissWrong;
 
@@ -416,6 +434,7 @@ class _DuolingoFeedbackPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final visible = kind != null;
+    final blocking = visible || blockTouches;
     final correct = kind == _PracticeFeedbackKind.correct;
     final baseColor = correct ? _green : _red;
     final shadowColor = correct ? _greenDark : _redDark;
@@ -432,10 +451,10 @@ class _DuolingoFeedbackPanel extends StatelessWidget {
       right: 0,
       bottom: 0,
       child: GestureDetector(
-        behavior: visible
+        behavior: blocking
             ? HitTestBehavior.opaque
             : HitTestBehavior.translucent,
-        onTap: visible ? () {} : null,
+        onTap: blocking ? () {} : null,
         child: Align(
           alignment: Alignment.bottomCenter,
           child: AnimatedSlide(
