@@ -118,16 +118,16 @@ class _HomePageState extends State<HomePage>
   Future<void> _screenshotToCard() async {
     if (_isGenerating || _isListening) return;
 
-    final goalText = await _resolveScreenshotGoal();
-    if (!mounted || goalText == null) return;
-
-    // Pick screenshots after the Flutter dialog has fully closed.
     final picker = ImagePicker();
     final files = await picker.pickMultiImage(
       imageQuality: 50,
       requestFullMetadata: false,
     );
     if (files.isEmpty) return;
+    if (!mounted) return;
+
+    final goalText = _resolveScreenshotGoal();
+
     final selectedFiles = files.take(8).toList();
     if (files.length > selectedFiles.length && mounted) {
       ScaffoldMessenger.of(
@@ -203,41 +203,10 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<String?> _resolveScreenshotGoal() async {
+  String _resolveScreenshotGoal() {
     final existingGoal = _textController.text.trim();
     if (existingGoal.isNotEmpty) return existingGoal;
-
-    // Ask for the goal before opening the system picker. Showing a Flutter
-    // route immediately after the picker closes can trip framework assertions
-    // on some Android builds while the picker route is being deactivated.
-    final goalCtrl = TextEditingController(text: '把截图里的手机操作讲成适合老人照做的步骤');
-    try {
-      final goal = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('这些截图是做什么的？'),
-          content: TextField(
-            controller: goalCtrl,
-            autofocus: true,
-            decoration: const InputDecoration(hintText: '比如：我要给孙子打微信视频'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, goalCtrl.text.trim()),
-              child: const Text('生成'),
-            ),
-          ],
-        ),
-      );
-      if (goal == null || goal.trim().isEmpty) return null;
-      return goal.trim();
-    } finally {
-      goalCtrl.dispose();
-    }
+    return '把截图里的手机操作讲成适合老人照做的步骤';
   }
 
   Future<void> _startVoice() async {
