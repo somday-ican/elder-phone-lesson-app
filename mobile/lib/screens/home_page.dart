@@ -154,10 +154,10 @@ class _HomePageState extends State<HomePage>
       final base64s = <String>[];
       for (final f in selectedFiles) {
         final bytes = await File(f.path).readAsBytes();
-        // Keep enough UI detail while staying small enough for mobile upload.
+        // Keep enough UI detail while avoiding slow vision requests.
         final decoded = img.decodeImage(bytes);
         if (decoded != null) {
-          const maxW = 520;
+          const maxW = 360;
           final resized = decoded.width > maxW
               ? img.copyResize(
                   decoded,
@@ -165,7 +165,7 @@ class _HomePageState extends State<HomePage>
                   height: (decoded.height * maxW / decoded.width).round(),
                 )
               : decoded;
-          final compressed = img.encodeJpg(resized, quality: 62);
+          final compressed = img.encodeJpg(resized, quality: 45);
           base64s.add('data:image/jpeg;base64,${base64Encode(compressed)}');
         } else {
           base64s.add('data:image/jpeg;base64,${base64Encode(bytes)}');

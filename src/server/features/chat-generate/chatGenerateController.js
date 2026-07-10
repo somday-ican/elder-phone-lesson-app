@@ -80,6 +80,7 @@ export async function chatGenerateController(req, res, config) {
       meta: { generatorMode: config.lessonGeneratorMode }
     });
   } catch (error) {
+    console.error("[chat-generate] remote model failed", error);
     sendJson(res, 500, {
       error: "Chat generation failed.",
       details: process.env.NODE_ENV !== "production" ? error.message : undefined
