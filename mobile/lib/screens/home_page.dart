@@ -120,6 +120,8 @@ class _HomePageState extends State<HomePage>
 
     final picker = ImagePicker();
     final files = await picker.pickMultiImage(
+      maxWidth: 360,
+      maxHeight: 800,
       imageQuality: 50,
       requestFullMetadata: false,
     );
@@ -195,12 +197,32 @@ class _HomePageState extends State<HomePage>
         setState(() => _isGenerating = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('生成失败：$error'),
+            content: Text(
+              '生成失败：${_friendlyGenerationError(error)}',
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+            ),
             backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 8),
           ),
         );
       }
     }
+  }
+
+  String _friendlyGenerationError(Object error) {
+    final message = error.toString().replaceFirst('Exception: ', '');
+    if (message.contains('413') || message.contains('too large')) {
+      return '图片太大，请少选几张或换更小的截图。';
+    }
+    if (message.contains('TimeoutException')) {
+      return '模型等待超时，请稍后再试。';
+    }
+    if (message.contains('Chat generate API returned')) {
+      final start = message.indexOf('{');
+      if (start >= 0) return message.substring(start);
+    }
+    return message;
   }
 
   String _resolveScreenshotGoal() {

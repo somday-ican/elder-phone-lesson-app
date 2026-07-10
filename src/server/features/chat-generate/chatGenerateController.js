@@ -10,6 +10,14 @@ const MAX_SCREENSHOT_COUNT = 8;
 const MAX_SCREENSHOT_DATA_URL_LENGTH = 900000;
 
 export async function chatGenerateController(req, res, config) {
+  const startedAt = Date.now();
+  const contentLength = Number.parseInt(req.headers["content-length"] || "0", 10) || 0;
+  console.log("[chat-generate] request start", {
+    contentLength,
+    mode: config.lessonGeneratorMode,
+    model: config.aiModelName
+  });
+
   const body = await readJsonBody(req, MAX_REQUEST_BYTES);
   if (!body) {
     sendJson(res, 400, { error: "Request body must be valid JSON." });
@@ -24,6 +32,14 @@ export async function chatGenerateController(req, res, config) {
 
   const { goal, stepCount } = validation.value;
   const customScreenshots = validateScreenshots(body.screenshots);
+  console.log("[chat-generate] request parsed", {
+    goal,
+    stepCount,
+    receivedScreenshots: Array.isArray(body.screenshots) ? body.screenshots.length : 0,
+    acceptedScreenshots: customScreenshots.length,
+    screenshotLengths: customScreenshots.map(s => s.length),
+    elapsedMs: Date.now() - startedAt
+  });
 
   // Mock mode — return static result
   if (config.lessonGeneratorMode === "mock") {
@@ -60,6 +76,11 @@ export async function chatGenerateController(req, res, config) {
     });
 
     const payload = await response.json().catch(() => ({}));
+    console.log("[chat-generate] model response", {
+      status: response.status,
+      ok: response.ok,
+      elapsedMs: Date.now() - startedAt
+    });
     if (!response.ok) {
       throw new Error(`Model request failed: ${response.status} ${JSON.stringify(payload)}`);
     }
@@ -79,6 +100,7 @@ export async function chatGenerateController(req, res, config) {
       steps: Array.isArray(parsed.steps) ? parsed.steps : buildMockSteps(stepCount),
       meta: { generatorMode: config.lessonGeneratorMode }
     });
+    console.log("[chat-generate] success", { elapsedMs: Date.now() - startedAt });
   } catch (error) {
     console.error("[chat-generate] remote model failed", error);
     sendJson(res, 500, {
